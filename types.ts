@@ -7,6 +7,7 @@ export interface Point {
 }
 
 export interface DrawStep {
+  id?: string;
   tool: Tool;
   points: Point[];
   color: string;

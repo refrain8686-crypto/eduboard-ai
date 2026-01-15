@@ -87,6 +87,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
   const [dragHandle, setDragHandle] = useState<string | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ start: Point, end: Point } | null>(null);
+  const [deletedIds, setDeletedIds] = useState<string[]>([]);
 
   const getPointsBox = useCallback((step: DrawStep) => {
     if (step.tool === 'text') {
@@ -197,11 +198,25 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   }, [redo, broadcast]);
 
   const deleteSelectionWrapped = useCallback(() => {
+    const currentHistory = useWhiteboardStore.getState().history;
+    const idsToDelete = selectedIndices
+      .map(idx => currentHistory[idx]?.id)
+      .filter((id): id is string => !!id);
+
+    if (idsToDelete.length > 0) {
+      supabase.from('whiteboard_history')
+        .delete()
+        .in('id', idsToDelete)
+        .then(({ error }) => {
+          if (error) console.error("Error deleting from DB:", error);
+        });
+    }
+
     deleteSelection();
     setTimeout(() => {
       broadcast('sync_history', { history: useWhiteboardStore.getState().history });
     }, 50);
-  }, [deleteSelection, broadcast]);
+  }, [deleteSelection, broadcast, selectedIndices]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -262,14 +277,17 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
     const fetchHistory = async () => {
       const { data, error } = await supabase
         .from('whiteboard_history')
-        .select('step_data')
+        .select('id, step_data')
         .eq('room_id', roomId)
         .order('id', { ascending: true });
 
       if (error) {
         console.error("Error loading history:", error);
       } else if (data && data.length > 0) {
-        const fullHistory = data.map(item => item.step_data);
+        const fullHistory = data.map(item => ({
+          ...(item.step_data as any),
+          id: item.id?.toString() // Ensure we have the DB ID
+        }));
 
         // Check for ownership claim
         const claimStep = fullHistory.find((s: any) => s.type === 'OWNERSHIP_CLAIM');
@@ -927,11 +945,8 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           });
 
           if (hit) {
+            if (step.id) setDeletedIds(prev => [...prev, step.id!]);
             removeStep(i);
-            // No need to break if we want to erase multiple overlapping lines,
-            // but usually eraser is fast enough that one per frame is fine.
-            // However, removing an element changes history indices, so we should break or adjust i.
-            // removeStep already updates history, so it's safer to break and wait for next frame/move.
             break;
           }
         }
@@ -956,8 +971,21 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
       setStartPoint(null);
       setInitialSelectedStep(null);
 
-      // Broadcast the final positions after moving/resizing
-      broadcast('sync_history', { history: useWhiteboardStore.getState().history });
+      // 2. Persist to DB (Persistence Layer)
+      const currentHistory = useWhiteboardStore.getState().history;
+      selectedIndices.forEach(idx => {
+        const step = currentHistory[idx];
+        if (step && step.id) {
+          supabase.from('whiteboard_history')
+            .update({ step_data: step })
+            .eq('id', step.id)
+            .then(({ error }) => {
+              if (error) console.error("Error updating step:", error);
+            });
+        }
+      });
+
+      broadcast('sync_history', { history: currentHistory });
       return;
     }
 
@@ -1000,7 +1028,16 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         setTimeout(() => textInputRef.current?.focus(), 50);
       }
     } else if ((tool as string) === 'eraser') {
-      // Finalize eraser stroke
+      // 2. Persist to DB (Persistence Layer)
+      if (deletedIds.length > 0) {
+        supabase.from('whiteboard_history')
+          .delete()
+          .in('id', deletedIds)
+          .then(({ error }) => {
+            if (error) console.error("Error deleting steps:", error);
+            setDeletedIds([]); // Clear the buffer
+          });
+      }
       broadcast('sync_history', { history: useWhiteboardStore.getState().history });
     } else {
       const newStep: DrawStep = {
@@ -1009,14 +1046,30 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         color: color,
         lineWidth: currentToolWidth
       };
+
+      // 1. Add locally
       addStep(newStep);
+      const index = useWhiteboardStore.getState().history.length - 1;
+
+      // 2. Broadcast (Fluency Layer - finalized)
       broadcast('step_added', { step: newStep });
+
+      // 3. Persist (Persistence Layer)
       supabase.from('whiteboard_history').insert({
         room_id: roomId,
         step_data: newStep,
         user_id: user.id
-      }).then(({ error }) => {
+      }).select().then(({ data, error }) => {
         if (error) console.error("Error saving to DB:", error);
+        if (data && data[0]) {
+          // Update the local step with the real database ID
+          const history = useWhiteboardStore.getState().history;
+          const updatedStep = { ...history[index], id: data[0].id.toString() };
+          // We use a internal setHistory to avoid pushing to past/future
+          const newHistory = [...history];
+          newHistory[index] = updatedStep;
+          useWhiteboardStore.getState().setHistory(newHistory);
+        }
       });
     }
 
