@@ -88,9 +88,11 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   const [dragHandle, setDragHandle] = useState<string | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ start: Point, end: Point } | null>(null);
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
+  const imageCache = useRef<Record<string, HTMLImageElement>>({});
+  const [, forceUpdate] = useState({});
 
   const getPointsBox = useCallback((step: DrawStep) => {
-    if (step.tool === 'text') {
+    if (step.tool === 'text' || step.tool === 'image') {
       return { x1: step.points[0].x, y1: step.points[0].y, x2: step.points[0].x + (step.width || 200), y2: step.points[0].y + (step.height || 50) };
     }
     if (step.tool === 'group' && step.steps) {
@@ -124,7 +126,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
   const getBoundingBox = useCallback((step: DrawStep) => {
     const box = getPointsBox(step);
-    if (step.tool === 'text' || step.tool === 'group') return box;
+    if (step.tool === 'text' || step.tool === 'group' || step.tool === 'image') return box;
     const margin = (step.lineWidth || 1);
     return {
       x1: box.x1 - margin, y1: box.y1 - margin,
@@ -225,7 +227,9 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         if (e.target === document.body) e.preventDefault();
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') copySelection();
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') paste();
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        // Handle via paste event
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'x') cutSelection();
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         if (e.shiftKey) redoWrapped();
@@ -524,9 +528,21 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           yOffset += fSize * 1.3;
         });
       });
+    } else if (step.tool === 'image' && step.imageData) {
+      const img = imageCache.current[step.imageData];
+      if (!img) {
+        const newImg = new Image();
+        newImg.src = step.imageData;
+        newImg.onload = () => {
+          imageCache.current[step.imageData!] = newImg;
+          forceUpdate({});
+        };
+      } else if (img.complete) {
+        ctx.drawImage(img, start.x, start.y, step.width || img.width, step.height || img.height);
+      }
     }
     ctx.restore();
-  }, []);
+  }, [getPointsBox]);
 
   const drawSelectionBox = useCallback((ctx: CanvasRenderingContext2D, step: DrawStep) => {
     // This legacy function is updated to handle the global selection box
@@ -881,9 +897,9 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         if (newX1 > newX2) { const t = newX1; newX1 = newX2; newX2 = t; }
         if (newY1 > newY2) { const t = newY1; newY1 = newY2; newY2 = t; }
 
-        if (updated.tool === 'text') {
-          updated.width = Math.max(50, newX2 - newX1);
-          updated.height = Math.max(30, newY2 - newY1);
+        if (updated.tool === 'text' || updated.tool === 'image') {
+          updated.width = Math.max(20, newX2 - newX1);
+          updated.height = Math.max(20, newY2 - newY1);
           if (dragHandle.includes('l')) updated.points[0].x = newX1;
           if (dragHandle.includes('t')) updated.points[0].y = newY1;
         } else {
@@ -1131,6 +1147,80 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
     setIsShapePickerOpen(false);
   };
+
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const blob = items[i].getAsFile();
+        if (!blob) continue;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const base64 = event.target?.result as string;
+          if (!base64) return;
+
+          const img = new Image();
+          img.src = base64;
+          img.onload = () => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+
+            const rect = canvas.getBoundingClientRect();
+            // Get center in board coordinates
+            const centerX = (-offset.x + (rect.width / scale / 2));
+            const centerY = (-offset.y + (rect.height / scale / 2));
+
+            const newStep: DrawStep = {
+              tool: 'image',
+              points: [{ x: centerX - (img.width / 2), y: centerY - (img.height / 2) }],
+              color: 'transparent',
+              lineWidth: 1,
+              imageData: base64,
+              width: img.width,
+              height: img.height
+            };
+
+            // Persist to Supabase and State
+            (async () => {
+              const { data, error } = await supabase
+                .from('whiteboard_history')
+                .insert({
+                  room_id: roomId,
+                  step_data: newStep,
+                  user_id: user.id
+                })
+                .select();
+
+              if (!error && data && data[0]) {
+                const persistedStep = { ...newStep, id: data[0].id.toString() };
+                const newIdx = useWhiteboardStore.getState().history.length;
+                addStep(persistedStep);
+                broadcast('step_added', { step: persistedStep });
+                // Auto-select and tool change
+                setTimeout(() => {
+                  setSelection([newIdx]);
+                  setTool('select');
+                }, 50);
+              } else {
+                console.error("Error persisting image:", error);
+                addStep(newStep);
+                broadcast('step_added', { step: newStep });
+              }
+            })();
+          };
+        };
+        reader.readAsDataURL(blob);
+      }
+    }
+  }, [roomId, user.id, offset, scale, addStep, broadcast]);
+
+  useEffect(() => {
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [handlePaste]);
 
   // Cleanup redundant declarations
   const fonts = [

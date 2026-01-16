@@ -104,7 +104,8 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     star: '#000000',
     highlighter: '#ffff00',
     marker: '#ff0000',
-    group: '#000000'
+    group: '#000000',
+    image: 'transparent'
   } as Record<Tool, string>,
   editingIndex: null,
   isShapePickerOpen: false,
@@ -124,7 +125,8 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     star: 3,
     text: 1,
     select: 1,
-    group: 1
+    group: 1,
+    image: 1
   },
 
   fontFamily: 'Inter, sans-serif',

@@ -1,5 +1,5 @@
 
-export type Tool = 'pencil' | 'eraser' | 'rect' | 'circle' | 'triangle' | 'arrow' | 'star' | 'text' | 'marker' | 'highlighter' | 'select' | 'group';
+export type Tool = 'pencil' | 'eraser' | 'rect' | 'circle' | 'triangle' | 'arrow' | 'star' | 'text' | 'marker' | 'highlighter' | 'select' | 'group' | 'image';
 
 export interface Point {
   x: number;
@@ -29,6 +29,7 @@ export interface DrawStep {
   rotation?: number; // In degrees
   flipX?: boolean;
   flipY?: boolean;
+  imageData?: string; // Base64 or URL
 }
 
 export interface User {
