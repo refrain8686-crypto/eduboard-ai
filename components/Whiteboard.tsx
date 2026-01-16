@@ -53,6 +53,8 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   const setIsShapePickerOpen = useWhiteboardStore(s => s.setIsShapePickerOpen);
   const isSmoothingEnabled = useWhiteboardStore(s => s.isSmoothingEnabled);
   const setHistory = useWhiteboardStore(s => s.setHistory);
+  const isAdmin = useWhiteboardStore(s => s.isAdmin);
+  const setIsAdmin = useWhiteboardStore(s => s.setIsAdmin);
   const users = useWhiteboardStore(s => s.users);
   const updateUserCursor = useWhiteboardStore(s => s.updateUserCursor);
   const moveSelectionToFront = useWhiteboardStore(s => s.moveSelectionToFront);
@@ -270,7 +272,6 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   // --- Initial Load & Presenter Mode (Follow Me) ---
   const isPresenter = useWhiteboardStore(s => s.isPresenter);
   const isFollowing = useWhiteboardStore(s => s.isFollowing);
-  const setIsAdmin = useWhiteboardStore(s => s.setIsAdmin);
 
   // Live Paths for Real-Time Drawing (Double Layer Strategy - Layer 1)
   const [livePaths, setLivePaths] = useState<Record<string, DrawStep>>({});
@@ -337,10 +338,10 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
   // 2. Presenter Logic (Broadcast Viewport)
   useEffect(() => {
-    if (isPresenter) {
-      broadcast('viewport_sync', { scale, offset, senderId: user.id });
+    if (isPresenter && isAdmin) {
+      broadcast('viewport_sync', { scale, offset, senderId: user.id, isFromAdmin: true });
     }
-  }, [isPresenter, scale, offset, broadcast, user.id]);
+  }, [isPresenter, isAdmin, scale, offset, broadcast, user.id]);
 
   const isPointInBox = (p: Point, box: { x1: number, y1: number, x2: number, y2: number }) => (
     p.x >= box.x1 && p.x <= box.x2 && p.y >= box.y1 && p.y <= box.y2
@@ -769,11 +770,12 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
       })
       .on('broadcast', { event: 'viewport_sync' }, (payload) => {
         if (payload.payload.senderId === user.id) return;
-        const { scale, offset } = payload.payload;
-        const { isAdmin } = useWhiteboardStore.getState();
-        // Auto-follow: if NOT admin, always sync.
-        if (!isAdmin) {
-          console.log("[Sync] Auto-following presenter:", scale, offset);
+        const { scale, offset, isFromAdmin } = payload.payload;
+        const { isAdmin, isFollowing } = useWhiteboardStore.getState();
+
+        // Only follow if the sender is an admin and the user is in following mode (or if we want to force follow for students)
+        if (!isAdmin && (isFollowing || isFromAdmin)) {
+          console.log("[Sync] Following presenter:", scale, offset);
           setScale(scale);
           setOffset(offset);
         }

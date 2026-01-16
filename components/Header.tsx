@@ -13,7 +13,8 @@ const Header: React.FC<HeaderProps> = ({ roomId, user }) => {
   const {
     scale, setScale, setOffset,
     isPresenter, setPresenterMode,
-    isFollowing, setFollowMode
+    isFollowing, setFollowMode,
+    isAdmin
   } = useWhiteboardStore();
 
   const [isShareOpen, setIsShareOpen] = useState(false);
@@ -76,26 +77,28 @@ const Header: React.FC<HeaderProps> = ({ roomId, user }) => {
       </div>
 
       {/* Collaboration Controls */}
-      <div className="hidden md:flex items-center gap-2">
-        <button
-          onClick={() => setPresenterMode(!isPresenter)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${isPresenter ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
-          title="Transmitir tu vista a los demás"
-        >
-          <Cast size={14} />
-          {isPresenter ? 'Presentando' : 'Modo Presentador'}
-        </button>
+      {isAdmin && (
+        <div className="hidden md:flex items-center gap-2">
+          <button
+            onClick={() => setPresenterMode(!isPresenter)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${isPresenter ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+            title="Transmitir tu vista a los demás"
+          >
+            <Cast size={14} />
+            {isPresenter ? 'Presentando' : 'Modo Presentador'}
+          </button>
 
-        <button
-          onClick={() => setFollowMode(!isFollowing)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${isFollowing ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
-          title="Ver lo que ve el presentador"
-          disabled={isPresenter}
-        >
-          <Eye size={14} />
-          {isFollowing ? 'Siguiendo' : 'Seguir'}
-        </button>
-      </div>
+          <button
+            onClick={() => setFollowMode(!isFollowing)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${isFollowing ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+            title="Ver lo que ve el presentador"
+            disabled={isPresenter}
+          >
+            <Eye size={14} />
+            {isFollowing ? 'Siguiendo' : 'Seguir'}
+          </button>
+        </div>
+      )}
 
       <div className="flex items-center space-x-3">
         <div className="flex -space-x-2 mr-2">
