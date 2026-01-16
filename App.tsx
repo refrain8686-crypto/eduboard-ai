@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import { User } from './types';
+import { supabase } from './supabaseClient';
 
 const App: React.FC = () => {
   const [roomId, setRoomId] = useState<string>('');
@@ -25,7 +26,45 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Assign a random identity for this session if not exists
+    // Escuchar el estado de autenticación de Supabase
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setCurrentUser(prev => ({
+          ...prev!,
+          id: session.user.id,
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || prev?.name || 'Usuario',
+          email: session.user.email
+        }));
+      } else {
+        // En modo invitado (sin login), mantenemos el ID aleatorio actual o creamos uno
+        if (!currentUser) {
+          const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
+          setCurrentUser({
+            id: Math.random().toString(36).substring(7),
+            name: `Usuario ${Math.floor(Math.random() * 100)}`,
+            color: colors[Math.floor(Math.random() * colors.length)]
+          });
+        }
+      }
+    });
+
+    // Carga inicial de sesión
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setCurrentUser({
+          id: session.user.id,
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Usuario',
+          color: '#3b82f6',
+          email: session.user.email
+        });
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    // Si no hay sesión iniciada y tampoco usuario temporal, creamos uno
     if (!currentUser) {
       const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
       setCurrentUser({
