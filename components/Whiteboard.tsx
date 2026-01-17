@@ -8,7 +8,7 @@ import {
   Bold, Underline, AlignLeft, AlignCenter, AlignRight, AlignJustify, Palette,
   Minus, Plus, Square, Circle, Triangle, ArrowRight, Star, X,
   ChevronsUp, ChevronUp, ChevronDown, ChevronsDown,
-  Copy, Scissors, ClipboardPaste, Layers, Group, Ungroup, Monitor
+  Copy, Scissors, ClipboardPaste, Layers, Group, Ungroup, Monitor, Crop
 } from 'lucide-react';
 import { analyzeWhiteboard } from '../services/geminiService';
 
@@ -539,7 +539,11 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           forceUpdate({});
         };
       } else if (img.complete) {
-        ctx.drawImage(img, start.x, start.y, step.width || img.width, step.height || img.height);
+        if (step.sw && step.sh) {
+          ctx.drawImage(img, step.sx || 0, step.sy || 0, step.sw, step.sh, start.x, start.y, step.width || step.sw, step.height || step.sh);
+        } else {
+          ctx.drawImage(img, start.x, start.y, step.width || img.width, step.height || img.height);
+        }
       }
     }
     ctx.restore();
@@ -1472,7 +1476,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         )}
 
         {/* PROPIEDADES DE FIGURA FLOTANTE */}
-        {selectedIndex !== null && selectedBox && !isSelectedText && ['rect', 'circle', 'triangle', 'arrow', 'star'].includes(selectedStep.tool) && (
+        {selectedIndex !== null && selectedBox && !isSelectedText && ['rect', 'circle', 'triangle', 'arrow', 'star', 'image'].includes(selectedStep.tool) && (
           <div
             className="absolute z-50 bg-[#1e1e1e] p-2 rounded-2xl shadow-2xl flex flex-wrap items-center gap-2 border border-gray-700 animate-in fade-in zoom-in-95 duration-200 min-w-[300px]"
             style={{
@@ -1484,9 +1488,13 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
               <span className="text-[10px] text-gray-500 font-bold px-1">W</span>
               <input
                 type="number"
-                value={Math.round(getPointsBox(selectedStep).x2 - getPointsBox(selectedStep).x1)}
+                value={Math.round(selectedStep.tool === 'image' ? (selectedStep.width || 200) : (getPointsBox(selectedStep).x2 - getPointsBox(selectedStep).x1))}
                 onChange={(e) => {
                   const newW = parseInt(e.target.value) || 10;
+                  if (selectedStep.tool === 'image') {
+                    updateStep(selectedIndex, { ...selectedStep, width: newW });
+                    return;
+                  }
                   const startX = selectedStep.points[0].x;
                   const newPoints = [...selectedStep.points.map(p => ({ ...p }))];
 
@@ -1511,9 +1519,13 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
               <span className="text-[10px] text-gray-500 font-bold px-1">H</span>
               <input
                 type="number"
-                value={Math.round(getPointsBox(selectedStep).y2 - getPointsBox(selectedStep).y1)}
+                value={Math.round(selectedStep.tool === 'image' ? (selectedStep.height || 200) : (getPointsBox(selectedStep).y2 - getPointsBox(selectedStep).y1))}
                 onChange={(e) => {
                   const newH = parseInt(e.target.value) || 10;
+                  if (selectedStep.tool === 'image') {
+                    updateStep(selectedIndex, { ...selectedStep, height: newH });
+                    return;
+                  }
                   const startY = selectedStep.points[0].y;
                   const newPoints = [...selectedStep.points.map(p => ({ ...p }))];
 
@@ -1549,75 +1561,114 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
             <div className="w-[1px] h-6 bg-gray-700 mx-1"></div>
 
-            {/* COLOR DE BORDE */}
-            <div className="flex gap-0.5 relative">
-              <button
-                onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
-                className="w-6 h-6 rounded-md border border-gray-600 flex items-center justify-center hover:bg-gray-800 transition-colors"
-                style={{ backgroundColor: selectedStep.color }}
-                title="Color de Borde"
-              >
-                <div className="w-3 h-3 border-2 border-white/80 rounded-sm"></div>
-              </button>
-
-              {isColorPickerOpen && (
-                <div className="absolute top-full left-0 mt-2 p-3 bg-[#1e1e1e] border border-gray-700 rounded-xl shadow-xl z-[70] w-[200px]">
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {colors.map(c => (
-                      <button
-                        key={c}
-                        onClick={() => {
-                          updateStep(selectedIndex, { ...selectedStep, color: c });
-                          setIsColorPickerOpen(false);
-                          setTimeout(() => broadcast('sync_history', { history: useWhiteboardStore.getState().history }), 50);
-                        }}
-                        className="w-6 h-6 rounded-full border border-gray-600 hover:scale-110 transition-transform"
-                        style={{ backgroundColor: c }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* COLOR DE RELLENO */}
-            <div className="flex gap-0.5 relative">
-              <button
-                onClick={() => setIsFillPickerOpen(!isFillPickerOpen)}
-                className="w-6 h-6 rounded-md border border-gray-600 flex items-center justify-center hover:bg-gray-800 transition-colors relative overflow-hidden"
-                style={{ backgroundColor: selectedStep.fillColor || 'transparent' }}
-                title="Color de Relleno"
-              >
-                {!selectedStep.fillColor && <div className="absolute inset-0 border-t border-red-500 rotate-45 scale-150 transform origin-center"></div>}
-                <div className="w-3 h-3 bg-white/50 rounded-sm"></div>
-              </button>
-
-              {isFillPickerOpen && (
-                <div className="absolute top-full left-0 mt-2 p-3 bg-[#1e1e1e] border border-gray-700 rounded-xl shadow-xl z-[70] w-[200px]">
+            {selectedStep.tool !== 'image' && (
+              <>
+                <div className="w-[1px] h-6 bg-gray-700 mx-1"></div>
+                {/* COLOR DE BORDE */}
+                <div className="flex gap-0.5 relative">
                   <button
-                    onClick={() => { updateStep(selectedIndex, { ...selectedStep, fillColor: undefined }); setIsFillPickerOpen(false); }}
-                    className="w-full text-xs text-center text-gray-400 hover:text-white p-2 border border-gray-700 rounded mb-2 hover:bg-gray-800"
+                    onClick={() => setIsColorPickerOpen(!isColorPickerOpen)}
+                    className="w-6 h-6 rounded-md border border-gray-600 flex items-center justify-center hover:bg-gray-800 transition-colors"
+                    style={{ backgroundColor: selectedStep.color }}
+                    title="Color de Borde"
                   >
-                    Sin Relleno
+                    <div className="w-3 h-3 border-2 border-white/80 rounded-sm"></div>
                   </button>
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {colors.map(c => (
-                      <button
-                        key={c}
-                        onClick={() => {
-                          updateStep(selectedIndex, { ...selectedStep, fillColor: c });
-                          setIsFillPickerOpen(false);
-                          setTimeout(() => broadcast('sync_history', { history: useWhiteboardStore.getState().history }), 50);
-                        }}
-                        className="w-6 h-6 rounded-full border border-gray-600 hover:scale-110 transition-transform"
-                        style={{ backgroundColor: c }}
-                      />
-                    ))}
-                  </div>
+                  {isColorPickerOpen && (
+                    <div className="absolute top-full left-0 mt-2 p-3 bg-[#1e1e1e] border border-gray-700 rounded-xl shadow-xl z-[70] w-[200px]">
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {colors.map(c => (
+                          <button
+                            key={c}
+                            onClick={() => {
+                              updateStep(selectedIndex, { ...selectedStep, color: c });
+                              setIsColorPickerOpen(false);
+                              setTimeout(() => broadcast('sync_history', { history: useWhiteboardStore.getState().history }), 50);
+                            }}
+                            className="w-6 h-6 rounded-full border border-gray-600 hover:scale-110 transition-transform"
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
 
-            </div>
+                {/* COLOR DE RELLENO */}
+                <div className="flex gap-0.5 relative">
+                  <button
+                    onClick={() => setIsFillPickerOpen(!isFillPickerOpen)}
+                    className="w-6 h-6 rounded-md border border-gray-600 flex items-center justify-center hover:bg-gray-800 transition-colors relative overflow-hidden"
+                    style={{ backgroundColor: selectedStep.fillColor || 'transparent' }}
+                    title="Color de Relleno"
+                  >
+                    {!selectedStep.fillColor && <div className="absolute inset-0 border-t border-red-500 rotate-45 scale-150 transform origin-center"></div>}
+                    <div className="w-3 h-3 bg-white/50 rounded-sm"></div>
+                  </button>
+                  {isFillPickerOpen && (
+                    <div className="absolute top-full left-0 mt-2 p-3 bg-[#1e1e1e] border border-gray-700 rounded-xl shadow-xl z-[70] w-[200px]">
+                      <button
+                        onClick={() => { updateStep(selectedIndex, { ...selectedStep, fillColor: undefined }); setIsFillPickerOpen(false); }}
+                        className="w-full text-xs text-center text-gray-400 hover:text-white p-2 border border-gray-700 rounded mb-2 hover:bg-gray-800"
+                      >
+                        Sin Relleno
+                      </button>
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {colors.map(c => (
+                          <button
+                            key={c}
+                            onClick={() => {
+                              updateStep(selectedIndex, { ...selectedStep, fillColor: c });
+                              setIsFillPickerOpen(false);
+                              setTimeout(() => broadcast('sync_history', { history: useWhiteboardStore.getState().history }), 50);
+                            }}
+                            className="w-6 h-6 rounded-full border border-gray-600 hover:scale-110 transition-transform"
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {selectedStep.tool === 'image' && (
+              <>
+                <div className="w-[1px] h-6 bg-gray-700 mx-1"></div>
+                {/* RECORTAR (CROP) */}
+                <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1" title="Recortar Imagen (X, Y, W, H)">
+                  <Crop size={14} className="text-gray-400 mx-1" />
+                  <input
+                    type="number" placeholder="X"
+                    value={selectedStep.sx || 0}
+                    onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sx: parseInt(e.target.value) || 0 })}
+                    className="w-8 bg-transparent text-white text-[10px] font-bold border-none outline-none"
+                  />
+                  <input
+                    type="number" placeholder="Y"
+                    value={selectedStep.sy || 0}
+                    onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sy: parseInt(e.target.value) || 0 })}
+                    className="w-8 bg-transparent text-white text-[10px] font-bold border-none outline-none"
+                  />
+                  <input
+                    type="number" placeholder="W"
+                    value={selectedStep.sw || (imageCache.current[selectedStep.imageData!]?.width || 0)}
+                    onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sw: parseInt(e.target.value) || 0 })}
+                    className="w-10 bg-transparent text-white text-[10px] font-bold border-none outline-none"
+                  />
+                  <input
+                    type="number" placeholder="H"
+                    value={selectedStep.sh || (imageCache.current[selectedStep.imageData!]?.height || 0)}
+                    onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sh: parseInt(e.target.value) || 0 })}
+                    className="w-10 bg-transparent text-white text-[10px] font-bold border-none outline-none"
+                  />
+                  {selectedStep.sw && (
+                    <button onClick={() => updateStep(selectedIndex, { ...selectedStep, sx: undefined, sy: undefined, sw: undefined, sh: undefined })} className="text-[9px] bg-red-900/50 text-red-200 px-1 rounded hover:bg-red-800 transition-colors">Reset</button>
+                  )}
+                </div>
+              </>
+            )}
 
 
             <div className="w-[1px] h-6 bg-gray-700 mx-1"></div>
@@ -1638,40 +1689,44 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
               </div>
             )}
 
-            <div className="flex gap-1 items-center bg-gray-800 rounded-lg p-1 mr-1">
-              {/* Toggle Lines */}
-              <button
-                onClick={() => {
-                  const nextStyle = !selectedStep.strokeDash ? [10, 5] : (selectedStep.strokeDash[0] === 10 ? [2, 4] : undefined);
-                  updateStep(selectedIndex, { ...selectedStep, strokeDash: nextStyle });
-                  broadcast('sync_history', { history: useWhiteboardStore.getState().history });
-                }}
-                className="p-1 text-gray-400 hover:text-white"
-                title="Estilo de Línea"
-              >
-                {!selectedStep.strokeDash ? <div className="w-4 h-0.5 bg-current"></div> :
-                  (selectedStep.strokeDash[0] === 10 ? <div className="flex gap-0.5"><div className="w-2 h-0.5 bg-current"></div><div className="w-1 h-0.5 bg-current"></div></div> :
-                    <div className="flex gap-0.5"><div className="w-0.5 h-0.5 bg-current rounded-full"></div><div className="w-0.5 h-0.5 bg-current rounded-full"></div><div className="w-0.5 h-0.5 bg-current rounded-full"></div></div>)}
-              </button>
-            </div>
+            {selectedStep.tool !== 'image' && (
+              <div className="flex gap-1 items-center bg-gray-800 rounded-lg p-1 mr-1">
+                {/* Toggle Lines */}
+                <button
+                  onClick={() => {
+                    const nextStyle = !selectedStep.strokeDash ? [10, 5] : (selectedStep.strokeDash[0] === 10 ? [2, 4] : undefined);
+                    updateStep(selectedIndex, { ...selectedStep, strokeDash: nextStyle });
+                    broadcast('sync_history', { history: useWhiteboardStore.getState().history });
+                  }}
+                  className="p-1 text-gray-400 hover:text-white"
+                  title="Estilo de Línea"
+                >
+                  {!selectedStep.strokeDash ? <div className="w-4 h-0.5 bg-current"></div> :
+                    (selectedStep.strokeDash[0] === 10 ? <div className="flex gap-0.5"><div className="w-2 h-0.5 bg-current"></div><div className="w-1 h-0.5 bg-current"></div></div> :
+                      <div className="flex gap-0.5"><div className="w-0.5 h-0.5 bg-current rounded-full"></div><div className="w-0.5 h-0.5 bg-current rounded-full"></div><div className="w-0.5 h-0.5 bg-current rounded-full"></div></div>)}
+                </button>
+              </div>
+            )}
 
-            <div className="flex gap-1 items-center bg-gray-800 rounded-lg p-1">
-              {/* Toggle Shadow */}
-              <button
-                onClick={() => {
-                  const updatedStep = {
-                    ...selectedStep,
-                    shadow: selectedStep.shadow ? undefined : { color: 'rgba(0,0,0,0.5)', blur: 10, offsetX: 5, offsetY: 5 }
-                  };
-                  updateStep(selectedIndex, updatedStep);
-                  broadcast('sync_history', { history: useWhiteboardStore.getState().history });
-                }}
-                className={`p-1 ${selectedStep.shadow ? 'text-indigo-400' : 'text-gray-400 hover:text-white'}`}
-                title="Sombra"
-              >
-                <div className="w-3 h-3 bg-current rounded-sm shadow-sm opacity-80"></div>
-              </button>
-            </div>
+            {selectedStep.tool !== 'image' && (
+              <div className="flex gap-1 items-center bg-gray-800 rounded-lg p-1">
+                {/* Toggle Shadow */}
+                <button
+                  onClick={() => {
+                    const updatedStep = {
+                      ...selectedStep,
+                      shadow: selectedStep.shadow ? undefined : { color: 'rgba(0,0,0,0.5)', blur: 10, offsetX: 5, offsetY: 5 }
+                    };
+                    updateStep(selectedIndex, updatedStep);
+                    broadcast('sync_history', { history: useWhiteboardStore.getState().history });
+                  }}
+                  className={`p-1 ${selectedStep.shadow ? 'text-indigo-400' : 'text-gray-400 hover:text-white'}`}
+                  title="Sombra"
+                >
+                  <div className="w-3 h-3 bg-current rounded-sm shadow-sm opacity-80"></div>
+                </button>
+              </div>
+            )}
             <div className="w-[1px] h-6 bg-gray-700 mx-1"></div>
 
             {/* CONTROL DE CAPAS (FIGURAS) */}

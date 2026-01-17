@@ -30,6 +30,10 @@ export interface DrawStep {
   flipX?: boolean;
   flipY?: boolean;
   imageData?: string; // Base64 or URL
+  sx?: number; // Source X (Crop)
+  sy?: number; // Source Y (Crop)
+  sw?: number; // Source Width (Crop)
+  sh?: number; // Source Height (Crop)
 }
 
 export interface User {
