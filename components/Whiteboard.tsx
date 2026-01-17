@@ -1454,21 +1454,25 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
         {/* User Cursors */}
         {Object.entries(users).map(([id, u]) => (
-          id !== user.id && (
+          id !== user.id && u.x !== -1000 && (
             <div
               key={id}
-              className="absolute pointer-events-none transition-all duration-75 z-50"
+              className="absolute pointer-events-none transition-all duration-100 z-50 pointer-events-none"
               style={{
                 left: (u.x + offset.x) * scale,
                 top: (u.y + offset.y) * scale,
-                transform: 'translate(-2px, -2px)'
               }}
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <svg
+                width="24" height="24" viewBox="0 0 24 24" fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className="drop-shadow-sm"
+                style={{ transform: 'translate(-2px, -2px)' }}
+              >
                 <path d="M5.65376 12.3822L2.99991 3.14706L14.4539 8.61771L8.85049 8.95551L5.65376 12.3822Z" fill={u.color} stroke="white" strokeWidth="1.5" />
               </svg>
               <div
-                className="ml-4 px-2 py-0.5 rounded text-[10px] whitespace-nowrap text-white font-medium shadow-sm"
+                className="absolute left-4 top-4 px-2 py-0.5 rounded text-[10px] whitespace-nowrap text-white font-bold shadow-md"
                 style={{ backgroundColor: u.color }}
               >
                 {u.name}
@@ -1932,28 +1936,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         )}
 
         {/* Cursors of other users */}
-        {Object.entries(users).map(([id, u]) => (
-          id !== user.id && u.x !== -1000 && (
-            <div
-              key={id}
-              className="absolute pointer-events-none transition-all duration-100 z-50 flex flex-col items-center"
-              style={{
-                left: (u.x + offset.x) * scale,
-                top: (u.y + offset.y) * scale,
-                transform: 'translate(-50%, -50%)'
-              }}
-            >
-              <ArrowRight
-                size={24}
-                className="rotate-[-45deg] drop-shadow-lg"
-                style={{ color: u.color, fill: u.color }}
-              />
-              <span className="bg-white/90 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm whitespace-nowrap -mt-1 border border-gray-100" style={{ color: u.color }}>
-                {u.name}
-              </span>
-            </div>
-          )
-        ))}
+
 
         {!isAiPanelOpen && (
           <button onClick={() => setIsAiPanelOpen(true)} className="absolute top-6 right-6 bg-indigo-600 text-white p-3 rounded-2xl shadow-xl z-30 hover:scale-110 transition-transform flex items-center gap-2">
