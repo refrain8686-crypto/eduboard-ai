@@ -1383,20 +1383,40 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
     >
       {cursorPos && ['pencil', 'eraser', 'highlighter', 'marker'].includes(tool) && (
         <div
-          className="pointer-events-none fixed z-50 rounded-full border border-gray-400/50"
+          className="pointer-events-none fixed z-[9999]"
           style={{
-            left: (cursorPos.x + offset.x) * scale,
-            top: (cursorPos.y + offset.y) * scale,
-            width: toolWidths[tool] * scale,
-            height: toolWidths[tool] * scale,
-            transform: 'translate(calc(-50% + var(--offset-x)), calc(-50% + var(--offset-y)))',
-            '--offset-x': `${containerRef.current?.getBoundingClientRect().left || 0}px`,
-            '--offset-y': `${containerRef.current?.getBoundingClientRect().top || 0}px`,
-            backgroundColor: tool === 'eraser' ? 'rgba(255,255,255,0.8)' : color,
-            border: tool === 'eraser' ? '1px solid #000' : '1px solid rgba(255,255,255,0.5)',
-            boxShadow: '0 0 5px rgba(0,0,0,0.2)'
-          } as React.CSSProperties}
-        />
+            left: (cursorPos.x + offset.x) * scale + (containerRef.current?.getBoundingClientRect().left || 0),
+            top: (cursorPos.y + offset.y) * scale + (containerRef.current?.getBoundingClientRect().top || 0),
+            transform: 'translate(-50%, -50%)',
+          }}
+        >
+          {/* Círculo indicador de tamaño */}
+          <div
+            className="rounded-full border border-gray-400/50 flex items-center justify-center"
+            style={{
+              width: Math.max(4, toolWidths[tool] * scale),
+              height: Math.max(4, toolWidths[tool] * scale),
+              backgroundColor: tool === 'eraser' ? 'rgba(255,255,255,0.8)' : `${color}22`, // Transparente para ver debajo
+              borderColor: tool === 'eraser' ? '#000' : color,
+              boxShadow: '0 0 2px rgba(0,0,0,0.2)'
+            }}
+          >
+            {/* Punto central de precisión */}
+            <div className="w-1 h-1 bg-black rounded-full" />
+          </div>
+
+          {/* Icono de Herramienta Flotante (Lápiz/Goma/etc) */}
+          <div
+            className="absolute top-0 left-full ml-1 p-1 bg-white/90 rounded shadow-lg border border-gray-200"
+            style={{ transform: 'translateY(-100%)' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-gray-700">
+              {tool === 'eraser' ? <path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L20 20Z" fill="currentColor" fillOpacity="0.2" /> :
+                tool === 'pencil' ? <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /> :
+                  <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />}
+            </svg>
+          </div>
+        </div>
       )}
       <div className="flex-1 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{
