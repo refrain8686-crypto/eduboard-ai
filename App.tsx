@@ -41,7 +41,7 @@ const App: React.FC = () => {
           const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
           setCurrentUser({
             id: Math.random().toString(36).substring(7),
-            name: `Usuario ${Math.floor(Math.random() * 100)}`,
+            name: `Usuario ${Math.floor(Math.random() * 1000)}`,
             color: colors[Math.floor(Math.random() * colors.length)]
           });
         }

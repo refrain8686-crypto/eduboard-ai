@@ -829,7 +829,24 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
       })
       .on('presence', { event: 'sync' }, () => {
         const presenceState = channel.presenceState();
-        console.log('Presence sync:', presenceState);
+        // Extraer todos los user_id presentes en el canal
+        const activeIds = new Set(Object.values(presenceState).flatMap(p => (p as any[]).map(m => m.user_id)));
+
+        const currentUsers = useWhiteboardStore.getState().users;
+        const newUsers = { ...currentUsers };
+        let changed = false;
+
+        // Eliminar usuarios que ya no están en la presencia (stale cursors)
+        Object.keys(currentUsers).forEach(id => {
+          if (!activeIds.has(id)) {
+            delete newUsers[id];
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          useWhiteboardStore.setState({ users: newUsers });
+        }
       })
       .subscribe(async (status) => {
         console.log(`Supabase Channel Status (${roomId}):`, status);
