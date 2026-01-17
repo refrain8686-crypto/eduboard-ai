@@ -44,7 +44,7 @@ interface WhiteboardState {
   setTextStyle: (style: Partial<Pick<DrawStep, 'fontFamily' | 'fontWeight' | 'textDecoration' | 'textAlign'>>) => void;
 
   addStep: (step: DrawStep) => void;
-  updateStep: (index: number, step: DrawStep) => void;
+  updateStep: (index: number, step: DrawStep, transient?: boolean) => void;
   removeStep: (index: number) => void;
   updateSelectedStep: (updates: Partial<DrawStep>) => void;
 
@@ -192,13 +192,13 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     future: []
   })),
 
-  updateStep: (index, step) => set((state) => {
+  updateStep: (index, step, transient = false) => set((state) => {
     const newHistory = [...state.history];
     newHistory[index] = step;
     return {
-      past: [...state.past, state.history],
+      past: transient ? state.past : [...state.past, state.history],
       history: newHistory,
-      future: [],
+      future: transient ? state.future : [],
       triggerRedraw: state.triggerRedraw + 1
     };
   }),

@@ -920,7 +920,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         selectedIndices.forEach(idx => {
           const originalStep = history[idx];
           if (!originalStep) return;
-          updateStep(idx, moveStepRecursive(originalStep, dx, dy));
+          updateStep(idx, moveStepRecursive(originalStep, dx, dy), true);
         });
         setStartPoint(pos);
       } else if (isResizing && dragHandle && selectedIndex !== null && initialSelectedStep) {
@@ -930,7 +930,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           const centerY = (box.y1 + box.y2) / 2;
           const angle = Math.atan2(pos.y - centerY, pos.x - centerX);
           const deg = (angle * 180) / Math.PI + 90;
-          updateStep(selectedIndex, { ...initialSelectedStep, rotation: deg });
+          updateStep(selectedIndex, { ...initialSelectedStep, rotation: deg }, true);
           return;
         }
 
@@ -1015,7 +1015,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           updated.points[0] = { x: newX1, y: newY1 };
           updated.points[updated.points.length - 1] = { x: newX2, y: newY2 };
         }
-        updateStep(selectedIndex, updated);
+        updateStep(selectedIndex, updated, true);
       }
       return;
     }
@@ -1090,14 +1090,23 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   const handlePointerUp = () => {
     if (isPanning) { setIsPanning(false); setLastPanPos(null); return; }
     if (isMoving || isResizing) {
+      // Commit the final state to history once
+      const currentHistory = useWhiteboardStore.getState().history;
+      if (selectedIndex !== null) {
+        updateStep(selectedIndex, currentHistory[selectedIndex], false);
+      } else {
+        selectedIndices.forEach(idx => {
+          updateStep(idx, currentHistory[idx], false);
+        });
+      }
+
       setIsMoving(false);
       setIsResizing(false);
       setDragHandle(null);
       setStartPoint(null);
       setInitialSelectedStep(null);
 
-      // 2. Persist to DB (Persistence Layer)
-      const currentHistory = useWhiteboardStore.getState().history;
+      // Persist to DB
       selectedIndices.forEach(idx => {
         const step = currentHistory[idx];
         if (step && step.id) {
