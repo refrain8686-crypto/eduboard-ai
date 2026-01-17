@@ -73,7 +73,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isAiPanelOpen, setIsAiPanelOpen] = useState(false);
-  const [isCropMode, setIsCropMode] = useState(false);
+
 
   const [isMoving, setIsMoving] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -562,9 +562,9 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
     if (!selectedBox) return;
 
     ctx.save();
-    ctx.strokeStyle = isCropMode ? '#ffffff' : '#4f46e5';
+    ctx.strokeStyle = '#4f46e5';
     ctx.lineWidth = 2 / scale;
-    if (!isCropMode) ctx.setLineDash([5 / scale, 5 / scale]);
+    ctx.setLineDash([5 / scale, 5 / scale]);
 
     const { x1, y1, x2, y2 } = selectedBox;
     const w = x2 - x1;
@@ -575,10 +575,10 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
     // Draw handles
     const handleSize = 8 / scale;
-    const thickHandle = 14 / scale;
+    const thickHandle = 12 / scale;
+    const handleStroke = 2 / scale;
 
     ctx.fillStyle = '#ffffff';
-    ctx.lineWidth = 2 / scale;
     ctx.setLineDash([]);
 
     const handles = [
@@ -588,55 +588,51 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
     ];
 
     handles.forEach(h => {
-      if (isCropMode) {
-        // Draw L-shaped crop handles
+      // Side handles (t, r, b, l) are bars for cropping/stretching
+      // Corner handles (tl, tr, br, bl) are circles for scaling
+      if (['t', 'b', 'l', 'r'].includes(h.id)) {
         ctx.beginPath();
-        const len = thickHandle;
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 4 / scale;
-
-        if (h.id === 'tl') {
-          ctx.moveTo(h.x + len, h.y); ctx.lineTo(h.x, h.y); ctx.lineTo(h.x, h.y + len);
-        } else if (h.id === 'tr') {
-          ctx.moveTo(h.x - len, h.y); ctx.lineTo(h.x, h.y); ctx.lineTo(h.x, h.y + len);
-        } else if (h.id === 'br') {
-          ctx.moveTo(h.x - len, h.y); ctx.lineTo(h.x, h.y); ctx.lineTo(h.x, h.y - len);
-        } else if (h.id === 'bl') {
-          ctx.moveTo(h.x + len, h.y); ctx.lineTo(h.x, h.y); ctx.lineTo(h.x, h.y - len);
-        } else if (h.id === 't') {
-          ctx.moveTo(h.x - len / 2, h.y); ctx.lineTo(h.x + len / 2, h.y);
-        } else if (h.id === 'b') {
-          ctx.moveTo(h.x - len / 2, h.y); ctx.lineTo(h.x + len / 2, h.y);
-        } else if (h.id === 'l') {
-          ctx.moveTo(h.x, h.y - len / 2); ctx.lineTo(h.x, h.y + len / 2);
-        } else if (h.id === 'r') {
-          ctx.moveTo(h.x, h.y - len / 2); ctx.lineTo(h.x, h.y + len / 2);
+        ctx.strokeStyle = '#4f46e5';
+        ctx.lineWidth = 3 / scale;
+        if (h.id === 't' || h.id === 'b') {
+          ctx.moveTo(h.x - thickHandle, h.y);
+          ctx.lineTo(h.x + thickHandle, h.y);
+        } else {
+          ctx.moveTo(h.x, h.y - thickHandle);
+          ctx.lineTo(h.x, h.y + thickHandle);
         }
+        ctx.stroke();
+        // White core for visibility
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1 / scale;
         ctx.stroke();
       } else {
         ctx.beginPath();
         ctx.arc(h.x, h.y, handleSize / 2, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = '#4f46e5';
+        ctx.lineWidth = handleStroke;
         ctx.stroke();
       }
     });
 
     // Rotation handle
-    if (!isCropMode) {
-      const rotX = (x1 + x2) / 2;
-      const rotY = y1 - 30 / scale;
-      ctx.beginPath();
-      ctx.moveTo(rotX, y1);
-      ctx.lineTo(rotX, rotY);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(rotX, rotY, handleSize / 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
+    const rotX = (x1 + x2) / 2;
+    const rotY = y1 - 30 / scale;
+    ctx.beginPath();
+    ctx.strokeStyle = '#4f46e5';
+    ctx.lineWidth = 2 / scale;
+    ctx.moveTo(rotX, y1);
+    ctx.lineTo(rotX, rotY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(rotX, rotY, handleSize / 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.stroke();
 
     ctx.restore();
-  }, [selectedBox, scale, isCropMode, selectedIndices]);
+  }, [selectedBox, scale, selectedIndices]);
 
   const redrawFullBoard = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
@@ -955,16 +951,16 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         const { x1, y1, x2, y2 } = getPointsBox(initialSelectedStep);
         let effDx = dx;
         let effDy = dy;
+        const isSideHandle = ['t', 'b', 'l', 'r'].includes(dragHandle);
+        const shouldCrop = updated.tool === 'image' && isSideHandle;
 
-        // --- ASPECT RATIO LOCK ---
-        // Lock for images by default (if not cropping) or when Shift is held
-        const shouldKeepRatio = (updated.tool === 'image' && !isCropMode) || e.shiftKey;
+        // --- ASPECT RATIO LOCK / PROPORTIONAL SCALING ---
+        const shouldKeepRatio = (updated.tool === 'image' && !isSideHandle) || e.shiftKey;
 
-        if (shouldKeepRatio && !isCropMode && ['tl', 'tr', 'bl', 'br'].includes(dragHandle)) {
+        if (shouldKeepRatio && !isSideHandle && ['tl', 'tr', 'bl', 'br'].includes(dragHandle)) {
           const origW = x2 - x1;
           const origH = y2 - y1;
           const ratio = origW / origH;
-
           if (Math.abs(dx) > Math.abs(dy)) {
             effDy = (dragHandle === 'tr' || dragHandle === 'bl') ? -dx / ratio : dx / ratio;
           } else {
@@ -988,7 +984,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           if (dragHandle.includes('b')) newY2 = newY1 + 5;
         }
 
-        if (isCropMode && updated.tool === 'image') {
+        if (shouldCrop) {
           const img = imageCache.current[updated.imageData!];
           if (img) {
             const curSx = updated.sx ?? 0;
@@ -1000,27 +996,26 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
             const ratioX = curSw / dispW;
             const ratioY = curSh / dispH;
 
-            if (dragHandle.includes('l')) {
-              const dX = (pos.x - initialSelectedStep!.points[0].x);
+            if (dragHandle === 'l') {
+              const dX = dx;
               updated.sx = Math.max(0, curSx + dX * ratioX);
               updated.sw = Math.max(1, curSw - dX * ratioX);
               updated.points[0].x = initialSelectedStep!.points[0].x + dX;
               updated.width = Math.max(1, dispW - dX);
-            } else if (dragHandle.includes('r')) {
-              const dW = (pos.x - (initialSelectedStep!.points[0].x + dispW));
-              updated.sw = Math.max(1, curSw + dW * ratioX);
-              updated.width = Math.max(1, dispW + dW);
-            }
-            if (dragHandle.includes('t')) {
-              const dY = (pos.y - initialSelectedStep!.points[0].y);
+            } else if (dragHandle === 'r') {
+              const dX = dx;
+              updated.sw = Math.max(1, curSw + dX * ratioX);
+              updated.width = Math.max(1, dispW + dX);
+            } else if (dragHandle === 't') {
+              const dY = dy;
               updated.sy = Math.max(0, curSy + dY * ratioY);
               updated.sh = Math.max(1, curSh - dY * ratioY);
               updated.points[0].y = initialSelectedStep!.points[0].y + dY;
               updated.height = Math.max(1, dispH - dY);
-            } else if (dragHandle.includes('b')) {
-              const dH = (pos.y - (initialSelectedStep!.points[0].y + dispH));
-              updated.sh = Math.max(1, curSh + dH * ratioY);
-              updated.height = Math.max(1, dispH + dH);
+            } else if (dragHandle === 'b') {
+              const dY = dy;
+              updated.sh = Math.max(1, curSh + dY * ratioY);
+              updated.height = Math.max(1, dispH + dY);
             }
           }
         } else if (updated.tool === 'text' || updated.tool === 'image') {
@@ -1789,45 +1784,12 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
             {selectedStep.tool === 'image' && (
               <>
                 <div className="w-[1px] h-6 bg-gray-700 mx-1"></div>
-                {/* RECORTAR (CROP) */}
-                <div className={`flex items-center gap-1 rounded-lg p-1 transition-colors ${isCropMode ? 'bg-indigo-600' : 'bg-gray-800'}`} title="Recortar Imagen Manualmente">
-                  <button
-                    onClick={() => setIsCropMode(!isCropMode)}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold ${isCropMode ? 'text-white' : 'text-gray-400 hover:text-white'}`}
-                  >
-                    <Crop size={14} />
-                    {isCropMode ? 'Finalizar Recorte' : 'Recortar'}
-                  </button>
-                  {isCropMode && (
-                    <div className="flex items-center gap-1 ml-2 border-l border-indigo-400 pl-2">
-                      <input
-                        type="number" placeholder="X"
-                        value={Math.round(selectedStep.sx || 0)}
-                        onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sx: parseInt(e.target.value) || 0 })}
-                        className="w-10 bg-transparent text-white text-[10px] font-bold border-none outline-none"
-                      />
-                      <input
-                        type="number" placeholder="Y"
-                        value={Math.round(selectedStep.sy || 0)}
-                        onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sy: parseInt(e.target.value) || 0 })}
-                        className="w-10 bg-transparent text-white text-[10px] font-bold border-none outline-none"
-                      />
-                      <input
-                        type="number" placeholder="W"
-                        value={Math.round(selectedStep.sw || (imageCache.current[selectedStep.imageData!]?.width || 0))}
-                        onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sw: parseInt(e.target.value) || 0 })}
-                        className="w-12 bg-transparent text-white text-[10px] font-bold border-none outline-none"
-                      />
-                      <input
-                        type="number" placeholder="H"
-                        value={Math.round(selectedStep.sh || (imageCache.current[selectedStep.imageData!]?.height || 0))}
-                        onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sh: parseInt(e.target.value) || 0 })}
-                        className="w-12 bg-transparent text-white text-[10px] font-bold border-none outline-none"
-                      />
-                    </div>
-                  )}
+                <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1" title="Info de Recorte">
+                  <div className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                    <Crop size={12} className="text-indigo-400" /> Arrastra los bordes laterales para recortar
+                  </div>
                   {selectedStep.sw && (
-                    <button onClick={() => { updateStep(selectedIndex, { ...selectedStep, sx: undefined, sy: undefined, sw: undefined, sh: undefined }); setIsCropMode(false); }} className="text-[9px] bg-red-900/50 text-red-200 px-2 py-1 rounded hover:bg-red-800 transition-colors">Reset</button>
+                    <button onClick={() => { updateStep(selectedIndex, { ...selectedStep, sx: undefined, sy: undefined, sw: undefined, sh: undefined }); }} className="text-[9px] bg-red-900/50 text-red-200 px-2 py-1 rounded hover:bg-red-800 transition-colors">Reset Recorte</button>
                   )}
                 </div>
               </>
