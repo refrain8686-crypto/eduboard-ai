@@ -73,6 +73,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isAiPanelOpen, setIsAiPanelOpen] = useState(false);
+  const [isCropMode, setIsCropMode] = useState(false);
 
   const [isMoving, setIsMoving] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -903,7 +904,42 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         if (newX1 > newX2) { const t = newX1; newX1 = newX2; newX2 = t; }
         if (newY1 > newY2) { const t = newY1; newY1 = newY2; newY2 = t; }
 
-        if (updated.tool === 'text' || updated.tool === 'image') {
+        if (isCropMode && updated.tool === 'image') {
+          const img = imageCache.current[updated.imageData!];
+          if (img) {
+            const curSx = updated.sx ?? 0;
+            const curSy = updated.sy ?? 0;
+            const curSw = updated.sw ?? img.width;
+            const curSh = updated.sh ?? img.height;
+            const dispW = initialSelectedStep!.width || img.width;
+            const dispH = initialSelectedStep!.height || img.height;
+            const ratioX = curSw / dispW;
+            const ratioY = curSh / dispH;
+
+            if (dragHandle.includes('l')) {
+              const dX = (pos.x - initialSelectedStep!.points[0].x);
+              updated.sx = Math.max(0, curSx + dX * ratioX);
+              updated.sw = Math.max(1, curSw - dX * ratioX);
+              updated.points[0].x = initialSelectedStep!.points[0].x + dX;
+              updated.width = Math.max(1, dispW - dX);
+            } else if (dragHandle.includes('r')) {
+              const dW = (pos.x - (initialSelectedStep!.points[0].x + dispW));
+              updated.sw = Math.max(1, curSw + dW * ratioX);
+              updated.width = Math.max(1, dispW + dW);
+            }
+            if (dragHandle.includes('t')) {
+              const dY = (pos.y - initialSelectedStep!.points[0].y);
+              updated.sy = Math.max(0, curSy + dY * ratioY);
+              updated.sh = Math.max(1, curSh - dY * ratioY);
+              updated.points[0].y = initialSelectedStep!.points[0].y + dY;
+              updated.height = Math.max(1, dispH - dY);
+            } else if (dragHandle.includes('b')) {
+              const dH = (pos.y - (initialSelectedStep!.points[0].y + dispH));
+              updated.sh = Math.max(1, curSh + dH * ratioY);
+              updated.height = Math.max(1, dispH + dH);
+            }
+          }
+        } else if (updated.tool === 'text' || updated.tool === 'image') {
           updated.width = Math.max(20, newX2 - newX1);
           updated.height = Math.max(20, newY2 - newY1);
           if (dragHandle.includes('l')) updated.points[0].x = newX1;
@@ -1637,34 +1673,44 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
               <>
                 <div className="w-[1px] h-6 bg-gray-700 mx-1"></div>
                 {/* RECORTAR (CROP) */}
-                <div className="flex items-center gap-1 bg-gray-800 rounded-lg p-1" title="Recortar Imagen (X, Y, W, H)">
-                  <Crop size={14} className="text-gray-400 mx-1" />
-                  <input
-                    type="number" placeholder="X"
-                    value={selectedStep.sx || 0}
-                    onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sx: parseInt(e.target.value) || 0 })}
-                    className="w-8 bg-transparent text-white text-[10px] font-bold border-none outline-none"
-                  />
-                  <input
-                    type="number" placeholder="Y"
-                    value={selectedStep.sy || 0}
-                    onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sy: parseInt(e.target.value) || 0 })}
-                    className="w-8 bg-transparent text-white text-[10px] font-bold border-none outline-none"
-                  />
-                  <input
-                    type="number" placeholder="W"
-                    value={selectedStep.sw || (imageCache.current[selectedStep.imageData!]?.width || 0)}
-                    onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sw: parseInt(e.target.value) || 0 })}
-                    className="w-10 bg-transparent text-white text-[10px] font-bold border-none outline-none"
-                  />
-                  <input
-                    type="number" placeholder="H"
-                    value={selectedStep.sh || (imageCache.current[selectedStep.imageData!]?.height || 0)}
-                    onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sh: parseInt(e.target.value) || 0 })}
-                    className="w-10 bg-transparent text-white text-[10px] font-bold border-none outline-none"
-                  />
+                <div className={`flex items-center gap-1 rounded-lg p-1 transition-colors ${isCropMode ? 'bg-indigo-600' : 'bg-gray-800'}`} title="Recortar Imagen Manualmente">
+                  <button
+                    onClick={() => setIsCropMode(!isCropMode)}
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold ${isCropMode ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    <Crop size={14} />
+                    {isCropMode ? 'Finalizar Recorte' : 'Recortar'}
+                  </button>
+                  {isCropMode && (
+                    <div className="flex items-center gap-1 ml-2 border-l border-indigo-400 pl-2">
+                      <input
+                        type="number" placeholder="X"
+                        value={Math.round(selectedStep.sx || 0)}
+                        onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sx: parseInt(e.target.value) || 0 })}
+                        className="w-10 bg-transparent text-white text-[10px] font-bold border-none outline-none"
+                      />
+                      <input
+                        type="number" placeholder="Y"
+                        value={Math.round(selectedStep.sy || 0)}
+                        onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sy: parseInt(e.target.value) || 0 })}
+                        className="w-10 bg-transparent text-white text-[10px] font-bold border-none outline-none"
+                      />
+                      <input
+                        type="number" placeholder="W"
+                        value={Math.round(selectedStep.sw || (imageCache.current[selectedStep.imageData!]?.width || 0))}
+                        onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sw: parseInt(e.target.value) || 0 })}
+                        className="w-12 bg-transparent text-white text-[10px] font-bold border-none outline-none"
+                      />
+                      <input
+                        type="number" placeholder="H"
+                        value={Math.round(selectedStep.sh || (imageCache.current[selectedStep.imageData!]?.height || 0))}
+                        onChange={(e) => updateStep(selectedIndex, { ...selectedStep, sh: parseInt(e.target.value) || 0 })}
+                        className="w-12 bg-transparent text-white text-[10px] font-bold border-none outline-none"
+                      />
+                    </div>
+                  )}
                   {selectedStep.sw && (
-                    <button onClick={() => updateStep(selectedIndex, { ...selectedStep, sx: undefined, sy: undefined, sw: undefined, sh: undefined })} className="text-[9px] bg-red-900/50 text-red-200 px-1 rounded hover:bg-red-800 transition-colors">Reset</button>
+                    <button onClick={() => { updateStep(selectedIndex, { ...selectedStep, sx: undefined, sy: undefined, sw: undefined, sh: undefined }); setIsCropMode(false); }} className="text-[9px] bg-red-900/50 text-red-200 px-2 py-1 rounded hover:bg-red-800 transition-colors">Reset</button>
                   )}
                 </div>
               </>
