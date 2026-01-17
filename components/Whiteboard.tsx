@@ -540,11 +540,13 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           forceUpdate({});
         };
       } else if (img.complete) {
-        if (step.sw && step.sh) {
-          ctx.drawImage(img, step.sx || 0, step.sy || 0, step.sw, step.sh, start.x, start.y, step.width || step.sw, step.height || step.sh);
-        } else {
-          ctx.drawImage(img, start.x, start.y, step.width || img.width, step.height || img.height);
-        }
+        const sx = step.sx ?? 0;
+        const sy = step.sy ?? 0;
+        const sw = step.sw ?? img.width;
+        const sh = step.sh ?? img.height;
+        const dw = step.width ?? sw;
+        const dh = step.height ?? sh;
+        ctx.drawImage(img, sx, sy, sw, sh, start.x, start.y, dw, dh);
       }
     }
     ctx.restore();
@@ -558,43 +560,83 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   // New function to draw box around all selected items
   const drawGroupSelectionBox = useCallback((ctx: CanvasRenderingContext2D) => {
     if (!selectedBox) return;
-    ctx.save();
-    ctx.strokeStyle = '#6366f1';
-    ctx.lineWidth = 1 / scale;
-    ctx.setLineDash([5 / scale, 5 / scale]);
-    ctx.strokeRect(selectedBox.x1 - 4, selectedBox.y1 - 4, (selectedBox.x2 - selectedBox.x1) + 8, (selectedBox.y2 - selectedBox.y1) + 8);
 
-    // Only show resize handles if single item selected (for simplicity initially) or allow scaling group
-    if (selectedIndices.length === 1) {
-      ctx.setLineDash([]);
-      ctx.fillStyle = '#6366f1';
-      ctx.strokeStyle = '#ffffff';
-      const handleSize = 8 / scale;
-      const box = selectedBox;
-      const handles = [
-        { x: box.x1, y: box.y1 }, { x: (box.x1 + box.x2) / 2, y: box.y1 }, { x: box.x2, y: box.y1 },
-        { x: box.x2, y: (box.y1 + box.y2) / 2 }, { x: box.x2, y: box.y2 }, { x: (box.x1 + box.x2) / 2, y: box.y2 },
-        { x: box.x1, y: box.y2 }, { x: box.x1, y: (box.y1 + box.y2) / 2 },
-        // Rotation handle
-        { id: 'rot', x: (box.x1 + box.x2) / 2, y: box.y1 - 30 / scale }
-      ];
-      handles.forEach(h => {
-        if (h.id === 'rot') {
-          ctx.beginPath();
-          ctx.moveTo(h.x, h.y + 30 / scale);
-          ctx.lineTo(h.x, h.y);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(h.x, h.y, 5 / scale, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          ctx.fillRect(h.x - handleSize / 2, h.y - handleSize / 2, handleSize, handleSize);
-          ctx.strokeRect(h.x - handleSize / 2, h.y - handleSize / 2, handleSize, handleSize);
+    ctx.save();
+    ctx.strokeStyle = isCropMode ? '#ffffff' : '#4f46e5';
+    ctx.lineWidth = 2 / scale;
+    if (!isCropMode) ctx.setLineDash([5 / scale, 5 / scale]);
+
+    const { x1, y1, x2, y2 } = selectedBox;
+    const w = x2 - x1;
+    const h = y2 - y1;
+
+    // Draw main box
+    ctx.strokeRect(x1, y1, w, h);
+
+    // Draw handles
+    const handleSize = 8 / scale;
+    const thickHandle = 14 / scale;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.lineWidth = 2 / scale;
+    ctx.setLineDash([]);
+
+    const handles = [
+      { id: 'tl', x: x1, y: y1 }, { id: 't', x: (x1 + x2) / 2, y: y1 }, { id: 'tr', x: x2, y: y1 },
+      { id: 'r', x: x2, y: (y1 + y2) / 2 }, { id: 'br', x: x2, y: y2 }, { id: 'b', x: (x1 + x2) / 2, y: y2 },
+      { id: 'bl', x: x1, y: y2 }, { id: 'l', x: x1, y: (y1 + y2) / 2 }
+    ];
+
+    handles.forEach(h => {
+      if (isCropMode) {
+        // Draw L-shaped crop handles
+        ctx.beginPath();
+        const len = thickHandle;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4 / scale;
+
+        if (h.id === 'tl') {
+          ctx.moveTo(h.x + len, h.y); ctx.lineTo(h.x, h.y); ctx.lineTo(h.x, h.y + len);
+        } else if (h.id === 'tr') {
+          ctx.moveTo(h.x - len, h.y); ctx.lineTo(h.x, h.y); ctx.lineTo(h.x, h.y + len);
+        } else if (h.id === 'br') {
+          ctx.moveTo(h.x - len, h.y); ctx.lineTo(h.x, h.y); ctx.lineTo(h.x, h.y - len);
+        } else if (h.id === 'bl') {
+          ctx.moveTo(h.x + len, h.y); ctx.lineTo(h.x, h.y); ctx.lineTo(h.x, h.y - len);
+        } else if (h.id === 't') {
+          ctx.moveTo(h.x - len / 2, h.y); ctx.lineTo(h.x + len / 2, h.y);
+        } else if (h.id === 'b') {
+          ctx.moveTo(h.x - len / 2, h.y); ctx.lineTo(h.x + len / 2, h.y);
+        } else if (h.id === 'l') {
+          ctx.moveTo(h.x, h.y - len / 2); ctx.lineTo(h.x, h.y + len / 2);
+        } else if (h.id === 'r') {
+          ctx.moveTo(h.x, h.y - len / 2); ctx.lineTo(h.x, h.y + len / 2);
         }
-      });
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(h.x, h.y, handleSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    });
+
+    // Rotation handle
+    if (!isCropMode) {
+      const rotX = (x1 + x2) / 2;
+      const rotY = y1 - 30 / scale;
+      ctx.beginPath();
+      ctx.moveTo(rotX, y1);
+      ctx.lineTo(rotX, rotY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(rotX, rotY, handleSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
     }
+
     ctx.restore();
-  }, [selectedBox, scale, selectedIndices]);
+  }, [selectedBox, scale, isCropMode, selectedIndices]);
 
   const redrawFullBoard = useCallback(() => {
     const canvas = canvasRef.current; if (!canvas) return;
