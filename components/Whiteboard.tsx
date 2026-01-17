@@ -936,15 +936,40 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
         const updated = { ...initialSelectedStep };
         const { x1, y1, x2, y2 } = getPointsBox(initialSelectedStep);
+        let effDx = dx;
+        let effDy = dy;
+
+        // --- ASPECT RATIO LOCK ---
+        // Lock for images by default (if not cropping) or when Shift is held
+        const shouldKeepRatio = (updated.tool === 'image' && !isCropMode) || e.shiftKey;
+
+        if (shouldKeepRatio && !isCropMode && ['tl', 'tr', 'bl', 'br'].includes(dragHandle)) {
+          const origW = x2 - x1;
+          const origH = y2 - y1;
+          const ratio = origW / origH;
+
+          if (Math.abs(dx) > Math.abs(dy)) {
+            effDy = (dragHandle === 'tr' || dragHandle === 'bl') ? -dx / ratio : dx / ratio;
+          } else {
+            effDx = (dragHandle === 'tr' || dragHandle === 'bl') ? -dy * ratio : dy * ratio;
+          }
+        }
+
         let newX1 = x1, newY1 = y1, newX2 = x2, newY2 = y2;
+        if (dragHandle.includes('l')) newX1 += effDx;
+        if (dragHandle.includes('r')) newX2 += effDx;
+        if (dragHandle.includes('t')) newY1 += effDy;
+        if (dragHandle.includes('b')) newY2 += effDy;
 
-        if (dragHandle.includes('l')) newX1 += dx;
-        if (dragHandle.includes('r')) newX2 += dx;
-        if (dragHandle.includes('t')) newY1 += dy;
-        if (dragHandle.includes('b')) newY2 += dy;
-
-        if (newX1 > newX2) { const t = newX1; newX1 = newX2; newX2 = t; }
-        if (newY1 > newY2) { const t = newY1; newY1 = newY2; newY2 = t; }
+        // Prevent flipping unless explicitly intended (min size 5)
+        if (newX2 - newX1 < 5) {
+          if (dragHandle.includes('l')) newX1 = newX2 - 5;
+          if (dragHandle.includes('r')) newX2 = newX1 + 5;
+        }
+        if (newY2 - newY1 < 5) {
+          if (dragHandle.includes('t')) newY1 = newY2 - 5;
+          if (dragHandle.includes('b')) newY2 = newY1 + 5;
+        }
 
         if (isCropMode && updated.tool === 'image') {
           const img = imageCache.current[updated.imageData!];
@@ -982,8 +1007,8 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
             }
           }
         } else if (updated.tool === 'text' || updated.tool === 'image') {
-          updated.width = Math.max(20, newX2 - newX1);
-          updated.height = Math.max(20, newY2 - newY1);
+          updated.width = Math.max(10, newX2 - newX1);
+          updated.height = Math.max(10, newY2 - newY1);
           if (dragHandle.includes('l')) updated.points[0].x = newX1;
           if (dragHandle.includes('t')) updated.points[0].y = newY1;
         } else {
