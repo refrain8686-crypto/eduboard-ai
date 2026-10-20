@@ -1,4 +1,4 @@
-
+﻿
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle } from 'react';
 import { useWhiteboardStore } from '../store/whiteboardStore';
 import { Point, User, DrawStep, Tool } from '../types';
@@ -11,6 +11,7 @@ import {
   Copy, Scissors, ClipboardPaste, Layers, Group, Ungroup, Monitor, Crop
 } from 'lucide-react';
 import { analyzeWhiteboard } from '../services/geminiService';
+import TutorResponse from './TutorResponse';
 
 const distanceToSegment = (p: Point, v: Point, w: Point) => {
   const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
@@ -2215,14 +2216,19 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           <div className="flex items-center gap-3"><Sparkles className="text-indigo-600" size={20} /><h2 className="text-sm font-extrabold text-gray-900 uppercase tracking-tighter">Tutor Gemini</h2></div>
           <button onClick={() => setIsAiPanelOpen(false)} className="text-gray-400 hover:text-gray-600"><PanelRightClose size={20} /></button>
         </div>
-        <div className="flex-1 overflow-y-auto p-6 prose prose-sm prose-indigo max-w-none text-gray-700 whitespace-pre-wrap">
+        <div className="flex-1 overflow-y-auto p-5 text-gray-700">
           {isAnalyzing ? (
-            <div className="flex flex-col items-center gap-4 mt-20">
+            <div className="flex flex-col items-center gap-4 mt-20 text-gray-500">
               <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-              <span>Analizando pizarra...</span>
+              <span className="text-xs font-semibold">Analizando pizarra con Tutor Gemini...</span>
             </div>
+          ) : aiResult ? (
+            <TutorResponse content={aiResult} />
           ) : (
-            aiResult || "Dibuja algo y usa el botón de abajo para que el tutor te explique."
+            <div className="flex flex-col items-center justify-center text-center h-full text-gray-400 p-4 gap-2">
+              <Sparkles size={32} className="text-indigo-300" />
+              <p className="text-xs font-medium">Dibuja un ejercicio, ecuación o diagrama en la pizarra y presiona <strong>Analizar Pizarra</strong> para recibir una explicación paso a paso.</p>
+            </div>
           )}
         </div>
         <div className="p-6 border-t border-gray-100">
