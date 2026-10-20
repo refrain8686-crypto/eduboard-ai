@@ -12,6 +12,14 @@ import {
 } from 'lucide-react';
 import { analyzeWhiteboard } from '../services/geminiService';
 
+const distanceToSegment = (p: Point, v: Point, w: Point) => {
+  const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
+  if (l2 === 0) return Math.sqrt(Math.pow(p.x - v.x, 2) + Math.pow(p.y - v.y, 2));
+  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.sqrt(Math.pow(p.x - (v.x + t * (w.x - v.x)), 2) + Math.pow(p.y - (v.y + t * (w.y - v.y)), 2));
+};
+
 interface WhiteboardProps { user: User; roomId: string; }
 
 const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
@@ -85,6 +93,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [lastPanPos, setLastPanPos] = useState<Point | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
   const [isFillPickerOpen, setIsFillPickerOpen] = useState(false);
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
@@ -204,14 +213,17 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
   const deleteSelectionWrapped = useCallback(() => {
     const currentHistory = useWhiteboardStore.getState().history;
-    const idsToDelete = selectedIndices
+    const uuidsToDelete = selectedIndices
       .map(idx => currentHistory[idx]?.id)
       .filter((id): id is string => !!id);
+    const dbIdsToDelete = selectedIndices
+      .map(idx => currentHistory[idx]?.dbId)
+      .filter((id): id is string | number => !!id);
 
-    if (idsToDelete.length > 0) {
+    if (dbIdsToDelete.length > 0) {
       supabase.from('whiteboard_history')
         .delete()
-        .in('id', idsToDelete)
+        .in('id', dbIdsToDelete)
         .then(({ error }) => {
           if (error) console.error("Error deleting from DB:", error);
         });
@@ -219,9 +231,58 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
     deleteSelection();
     setTimeout(() => {
-      broadcast('sync_history', { history: useWhiteboardStore.getState().history });
+      broadcast('steps_removed', { ids: uuidsToDelete });
     }, 50);
   }, [deleteSelection, broadcast, selectedIndices]);
+
+  const cutSelectionWrapped = useCallback(() => {
+    const currentHistory = useWhiteboardStore.getState().history;
+    const uuidsToDelete = selectedIndices
+      .map(idx => currentHistory[idx]?.id)
+      .filter((id): id is string => !!id);
+    const dbIdsToDelete = selectedIndices
+      .map(idx => currentHistory[idx]?.dbId)
+      .filter((id): id is string | number => !!id);
+
+    if (dbIdsToDelete.length > 0) {
+      supabase.from('whiteboard_history')
+        .delete()
+        .in('id', dbIdsToDelete)
+        .then(({ error }) => {
+          if (error) console.error("Error deleting in cut:", error);
+        });
+    }
+
+    cutSelection();
+    setTimeout(() => {
+      broadcast('steps_removed', { ids: uuidsToDelete });
+    }, 50);
+  }, [cutSelection, broadcast, selectedIndices]);
+
+  const pasteWrapped = useCallback(() => {
+    const state = useWhiteboardStore.getState();
+    const itemsCount = state.clipboard.length;
+    if (itemsCount === 0) return;
+
+    paste();
+
+    // Sincronizar y persistir los nuevos elementos
+    setTimeout(() => {
+      const newState = useWhiteboardStore.getState();
+      const newItems = newState.history.slice(newState.history.length - itemsCount);
+
+      newItems.forEach(item => {
+        broadcast('step_added', { step: item });
+        supabase.from('whiteboard_history').insert({
+          room_id: roomId,
+          step_data: item,
+          user_id: user.id
+        }).then(({ error }) => {
+          if (error) console.error("Error saving pasted item:", error);
+        });
+      });
+    }, 50);
+  }, [paste, broadcast, roomId, user.id]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -231,9 +292,9 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') copySelection();
       if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
-        // Handle via paste event
+        // Dejamos que el evento 'paste' maneje todo para mayor compatibilidad
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'x') cutSelection();
+      if ((e.ctrlKey || e.metaKey) && e.key === 'x') cutSelectionWrapped();
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         if (e.shiftKey) redoWrapped();
         else undoWrapped();
@@ -259,7 +320,11 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   useImperativeHandle(ref, () => ({
     undo: undoWrapped,
     redo: redoWrapped,
-    deleteSelection: deleteSelectionWrapped
+    deleteSelection: deleteSelectionWrapped,
+    paste: pasteWrapped,
+    cut: cutSelectionWrapped,
+    copy: copySelection,
+    triggerImageUpload: () => fileInputRef.current?.click()
   }));
 
   const clearBoard = useCallback(() => {
@@ -283,20 +348,47 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
     const fetchHistory = async () => {
       const { data, error } = await supabase
         .from('whiteboard_history')
-        .select('id, step_data')
+        .select('id, step_data, created_at')
         .eq('room_id', roomId)
         .order('id', { ascending: true });
 
       if (error) {
         console.error("Error loading history:", error);
       } else if (data && data.length > 0) {
-        const fullHistory = data.map(item => ({
-          ...(item.step_data as any),
-          id: item.id?.toString() // Ensure we have the DB ID
-        }));
+        const fullHistory = data.map(item => {
+          const stepData = item.step_data as any;
+          if (stepData.type === 'OWNERSHIP_CLAIM') return { ...stepData, created_at: item.created_at };
+          const step = stepData as DrawStep;
+          return {
+            ...step,
+            id: (step.id || item.id).toString(),
+            dbId: item.id
+          };
+        });
 
         // Check for ownership claim
         const claimStep = fullHistory.find((s: any) => s.type === 'OWNERSHIP_CLAIM');
+
+        // Update local dashboard list to ensure this board is visible in "Inicio"
+        if (claimStep) {
+          try {
+            const saved = localStorage.getItem('eduboard_boards');
+            let boards = saved ? JSON.parse(saved) : [];
+            if (!boards.find((b: any) => b.id === roomId)) {
+              const newBoard = {
+                id: roomId,
+                name: claimStep.boardName || `Pizarra ${roomId.substring(0, 4)}`,
+                createdAt: new Date(claimStep.created_at || Date.now()).getTime(),
+                lastModified: Date.now(),
+                ownerEmail: claimStep.ownerEmail
+              };
+              localStorage.setItem('eduboard_boards', JSON.stringify([newBoard, ...boards]));
+            }
+          } catch (e) {
+            console.error("Error updating local boards list:", e);
+          }
+        }
+
         if (claimStep && user.email) {
           if (claimStep.ownerEmail === user.email) {
             console.log("You are the owner of this board.");
@@ -418,31 +510,49 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
     if (['pencil', 'eraser', 'highlighter', 'marker'].includes(step.tool)) {
       if (points.length < 2) {
         ctx.beginPath();
-        ctx.arc(start.x, start.y, step.lineWidth / 2, 0, Math.PI * 2);
+        ctx.arc(start.x, start.y, ctx.lineWidth / 2, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        ctx.beginPath();
-        ctx.moveTo(start.x, start.y);
-
-        // Algoritmo de suavizado con curvas de Bezier
-        for (let i = 1; i < points.length - 2; i++) {
-          const xc = (points[i].x + points[i + 1].x) / 2;
-          const yc = (points[i].y + points[i + 1].y) / 2;
-          ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
-        }
-
-        // Curva final para los últimos dos puntos
-        if (points.length > 2) {
-          ctx.quadraticCurveTo(
-            points[points.length - 2].x,
-            points[points.length - 2].y,
-            points[points.length - 1].x,
-            points[points.length - 1].y
-          );
+        const isDynamic = step.tool === 'pencil';
+        
+        if (isDynamic && points.length > 2) {
+          // --- EFECTO CALIGRÁFICO DINÁMICO (SENSIBLE A VELOCIDAD) ---
+          let lastW = ctx.lineWidth;
+          for (let i = 1; i < points.length; i++) {
+            const p1 = points[i - 1];
+            const p2 = points[i];
+            const d = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+            
+            // Más agresivo: Reducción de hasta el 70% en velocidad alta
+            // Factor de velocidad (d): 0-20+
+            const speedFactor = Math.max(0, Math.min(1, d / 25));
+            const targetW = step.lineWidth * (1.1 - speedFactor * 0.8);
+            
+            const currentW = lastW + (targetW - lastW) * 0.4;
+            
+            ctx.beginPath();
+            ctx.lineWidth = currentW;
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+            lastW = currentW;
+          }
         } else {
-          ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+          // Trazo estándar suavizado para borrador, resaltador y marcador
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          for (let i = 1; i < points.length - 2; i++) {
+            const xc = (points[i].x + points[i + 1].x) / 2;
+            const yc = (points[i].y + points[i + 1].y) / 2;
+            ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+          }
+          if (points.length > 2) {
+            ctx.quadraticCurveTo(points[points.length - 2].x, points[points.length - 2].y, points[points.length - 1].x, points[points.length - 1].y);
+          } else {
+            ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+          }
+          ctx.stroke();
         }
-        ctx.stroke();
       }
     } else if (step.tool === 'rect') {
       const w = end.x - start.x;
@@ -802,6 +912,34 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
         const { userId, x, y, name, color } = payload.payload;
         updateUserCursor(userId, { x, y, name, color });
       })
+      .on('broadcast', { event: 'steps_removed' }, (payload) => {
+        if (payload.payload.senderId === user.id) return;
+        const { ids } = payload.payload;
+        if (!ids || !Array.isArray(ids)) return;
+
+        const currentHistory = useWhiteboardStore.getState().history;
+        const idsSet = new Set(ids.map(id => id.toString()));
+
+        const nextHistory = currentHistory.filter(step => {
+          const sId = step.id?.toString();
+          const sDbId = step.dbId?.toString();
+          // Match against ANY known identifier
+          return !((sId && idsSet.has(sId)) || (sDbId && idsSet.has(sDbId)));
+        });
+
+        if (nextHistory.length !== currentHistory.length) {
+          console.log(`[Sync] Removing ${currentHistory.length - nextHistory.length} items from student view`);
+          setHistory(nextHistory);
+        }
+      })
+      .on('broadcast', { event: 'clear_live_path' }, (payload) => {
+        if (payload.payload.senderId === user.id) return;
+        setLivePaths(prev => {
+          const next = { ...prev };
+          delete next[payload.payload.senderId];
+          return next;
+        });
+      })
       // NEW: Listen for live drawing streams
       .on('broadcast', { event: 'drawing_stream' }, (payload) => {
         if (payload.payload.senderId === user.id) return;
@@ -890,11 +1028,11 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
       });
 
       // 2. Live Drawing Stream Broadcast
-      if (isDrawing && startPoint && ['pencil', 'eraser', 'highlighter', 'marker'].includes(tool)) {
+      if (isDrawing && startPoint && tool !== 'eraser') {
         // Construct the transient step
         const liveStep: DrawStep = {
           tool: tool as Tool,
-          points: [...currentPoints, pos],
+          points: ['pencil', 'eraser', 'highlighter', 'marker'].includes(tool) ? [...currentPoints, pos] : [startPoint, pos],
           color: color,
           lineWidth: toolWidths[tool] || 3
         };
@@ -1062,29 +1200,71 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
 
       if (tool === 'eraser') {
         const eraserRadius = (toolWidths.eraser || 20) / 2;
-        // Search for items to erase
-        for (let i = history.length - 1; i >= 0; i--) {
-          const step = history[i];
-          if (!['pencil', 'marker', 'highlighter'].includes(step.tool)) continue;
+        const currentHistory = useWhiteboardStore.getState().history;
+        const indicesToRemove: number[] = [];
+        const idsToRemove: string[] = [];
+        const idsToRemoveFromDB: (string | number)[] = [];
+
+        // Search for ALL items under the eraser in this frame
+        for (let i = currentHistory.length - 1; i >= 0; i--) {
+          const step = currentHistory[i];
+          if (step.tool === 'select') continue;
 
           const box = getBoundingBox(step);
-          // Quick bounding box check
+          // Quick bounding box check with generous margin
           if (pos.x < box.x1 - eraserRadius || pos.x > box.x2 + eraserRadius ||
             pos.y < box.y1 - eraserRadius || pos.y > box.y2 + eraserRadius) {
             continue;
           }
 
-          // Precise distance check to points
-          const hit = step.points.some(p => {
-            const dx = p.x - pos.x;
-            const dy = p.y - pos.y;
-            return Math.sqrt(dx * dx + dy * dy) < eraserRadius + (step.lineWidth / 2);
-          });
+          let hit = false;
+          // Precision check for pencil-like tools
+          if (['pencil', 'marker', 'highlighter', 'eraser', 'arrow'].includes(step.tool)) {
+            hit = step.points.some((p, j) => {
+              const dx = p.x - pos.x;
+              const dy = p.y - pos.y;
+              if (Math.sqrt(dx * dx + dy * dy) < eraserRadius + (step.lineWidth / 2)) return true;
+              if (j > 0) {
+                const prev = step.points[j - 1];
+                if (distanceToSegment(pos, prev, p) < eraserRadius + (step.lineWidth / 2)) return true;
+              }
+              return false;
+            });
+          } else {
+            // For other shapes/images/text, a bounding box check is often enough, 
+            // but we can refine it to check if we are near the actual drawn pixels.
+            // For now, if we touch the bounding box of a shape, we remove it.
+            hit = true;
+          }
 
           if (hit) {
-            if (step.id) setDeletedIds(prev => [...prev, step.id!]);
-            removeStep(i);
-            break;
+            indicesToRemove.push(i);
+            const stableId = (step.id || step.dbId || i).toString();
+            idsToRemove.push(stableId);
+            if (step.dbId) idsToRemoveFromDB.push(step.dbId.toString());
+          }
+        }
+
+        if (indicesToRemove.length > 0) {
+          // 1. Remove locally
+          const newHistory = [...currentHistory];
+          indicesToRemove.sort((a, b) => b - a).forEach(idx => {
+            newHistory.splice(idx, 1);
+          });
+          setHistory(newHistory);
+
+          // 2. Broadcast immediately using the stable ID
+          broadcast('steps_removed', { ids: idsToRemove });
+
+          // 3. Queue for DB deletion
+          if (idsToRemoveFromDB.length > 0) {
+            setDeletedIds(prev => {
+              const next = [...prev];
+              idsToRemoveFromDB.forEach(id => {
+                if (!next.includes(id)) next.push(id);
+              });
+              return next;
+            });
           }
         }
       }
@@ -1161,6 +1341,9 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
     setIsDrawing(false);
     tempCanvasRef.current?.getContext('2d')?.clearRect(0, 0, tempCanvasRef.current!.width, tempCanvasRef.current!.height);
 
+    // Clean up live paths on all clients
+    broadcast('clear_live_path', {});
+
     const lastPos = currentPoints.length > 0 ? currentPoints[currentPoints.length - 1] : startPoint!;
     const currentToolWidth = toolWidths[tool];
 
@@ -1187,6 +1370,7 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
       broadcast('sync_history', { history: useWhiteboardStore.getState().history });
     } else {
       const newStep: DrawStep = {
+        id: crypto.randomUUID(), // Generate unique ID immediately
         tool,
         points: ['pencil', 'eraser', 'highlighter', 'marker'].includes(tool) ? [...currentPoints] : [startPoint, lastPos],
         color: color,
@@ -1208,13 +1392,12 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
       }).select().then(({ data, error }) => {
         if (error) console.error("Error saving to DB:", error);
         if (data && data[0]) {
-          // Update the local step with the real database ID
-          const history = useWhiteboardStore.getState().history;
-          const updatedStep = { ...history[index], id: data[0].id.toString() };
-          // We use a internal setHistory to avoid pushing to past/future
-          const newHistory = [...history];
-          newHistory[index] = updatedStep;
-          useWhiteboardStore.getState().setHistory(newHistory);
+          const dbId = data[0].id;
+          const currentHistory = useWhiteboardStore.getState().history;
+          const index = currentHistory.findIndex(s => s.id === newStep.id);
+          if (index !== -1) {
+            updateStep(index, { ...currentHistory[index], dbId }, true);
+          }
         }
       });
     }
@@ -1257,7 +1440,6 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
     const centerY = (rect.height / 2) / scale - offset.y;
     const size = 150;
 
-    const currentLength = history.length;
     const newStep: DrawStep = {
       tool: shapeType,
       points: [
@@ -1268,84 +1450,203 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
       lineWidth: toolWidths[shapeType] || 3
     };
 
-    addStep(newStep);
+    // 1. Persist to DB
+    supabase.from('whiteboard_history').insert({
+      room_id: roomId,
+      step_data: newStep,
+      user_id: user.id
+    }).select().then(({ data, error }) => {
+      if (error) console.error("Error saving shape to DB:", error);
 
-    setTimeout(() => {
-      setSelection([currentLength]);
-      setTool('select');
-    }, 50);
+      const currentLength = useWhiteboardStore.getState().history.length;
+      const stepWithId = { ...newStep, id: data?.[0]?.id?.toString() };
+
+      // 2. Add locally
+      addStep(stepWithId);
+
+      // 3. Broadcast
+      broadcast('step_added', { step: stepWithId });
+
+      setTimeout(() => {
+        setSelection([currentLength]);
+        setTool('select');
+      }, 50);
+    });
 
     setIsShapePickerOpen(false);
   };
 
-  const handlePaste = useCallback((e: ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
+  const processImage = useCallback(async (file: File | Blob) => {
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64 = event.target?.result as string;
+      if (!base64) return;
 
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        const blob = items[i].getAsFile();
-        if (!blob) continue;
+      const img = new Image();
+      img.src = base64;
+      img.onload = async () => {
+        // --- COMPRESIÓN Y REDIMENSIONAMIENTO ---
+        const MAX_DIM = 1200;
+        let targetW = img.width;
+        let targetH = img.height;
 
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const base64 = event.target?.result as string;
-          if (!base64) return;
+        if (targetW > MAX_DIM || targetH > MAX_DIM) {
+          const ratio = Math.min(MAX_DIM / targetW, MAX_DIM / targetH);
+          targetW *= ratio;
+          targetH *= ratio;
+        }
 
-          const img = new Image();
-          img.src = base64;
-          img.onload = () => {
-            const canvas = canvasRef.current;
-            if (!canvas) return;
+        const offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width = targetW;
+        offscreenCanvas.height = targetH;
+        const octx = offscreenCanvas.getContext('2d');
+        octx?.drawImage(img, 0, 0, targetW, targetH);
+        const compressedBase64 = offscreenCanvas.toDataURL('image/jpeg', 0.7);
 
-            const rect = canvas.getBoundingClientRect();
-            // Get center in board coordinates
-            const centerX = (-offset.x + (rect.width / scale / 2));
-            const centerY = (-offset.y + (rect.height / scale / 2));
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
 
-            const newStep: DrawStep = {
-              tool: 'image',
-              points: [{ x: centerX - (img.width / 2), y: centerY - (img.height / 2) }],
-              color: 'transparent',
-              lineWidth: 1,
-              imageData: base64,
-              width: img.width,
-              height: img.height
-            };
+        let w = targetW;
+        let h = targetH;
+        const maxViewW = (rect.width / scale) * 0.8;
+        const maxViewH = (rect.height / scale) * 0.8;
 
-            // Persist to Supabase and State
-            (async () => {
-              const { data, error } = await supabase
-                .from('whiteboard_history')
-                .insert({
-                  room_id: roomId,
-                  step_data: newStep,
-                  user_id: user.id
-                })
-                .select();
+        if (w > maxViewW || h > maxViewH) {
+          const ratio = Math.min(maxViewW / w, maxViewH / h);
+          w *= ratio;
+          h *= ratio;
+        }
 
-              if (!error && data && data[0]) {
-                const persistedStep = { ...newStep, id: data[0].id.toString() };
-                const newIdx = useWhiteboardStore.getState().history.length;
-                addStep(persistedStep);
-                broadcast('step_added', { step: persistedStep });
-                // Auto-select and tool change
-                setTimeout(() => {
-                  setSelection([newIdx]);
-                  setTool('select');
-                }, 50);
-              } else {
-                console.error("Error persisting image:", error);
-                addStep(newStep);
-                broadcast('step_added', { step: newStep });
-              }
-            })();
-          };
+        const centerX = (-offset.x + (rect.width / scale / 2));
+        const centerY = (-offset.y + (rect.height / scale / 2));
+
+        let finalUrl = compressedBase64;
+        try {
+          const fileName = `${roomId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+          const blob = await (await fetch(compressedBase64)).blob();
+          const { data, error } = await supabase.storage.from('whiteboard_images').upload(fileName, blob, { contentType: 'image/jpeg' });
+
+          if (!error && data) {
+            const { data: { publicUrl } } = supabase.storage.from('whiteboard_images').getPublicUrl(fileName);
+            finalUrl = publicUrl;
+          }
+        } catch (e) {
+          console.warn("Storage upload failed, falling back to base64", e);
+        }
+
+        const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36);
+        
+        const newStep: DrawStep = {
+          id: newId,
+          tool: 'image',
+          points: [{ x: centerX - (w / 2), y: centerY - (h / 2) }],
+          color: 'transparent',
+          lineWidth: 1,
+          imageData: finalUrl,
+          width: w,
+          height: h
         };
-        reader.readAsDataURL(blob);
+
+        // 1. Añadir localmente de inmediato para feedback instantáneo
+        addStep(newStep);
+        broadcast('step_added', { step: newStep });
+
+        // 2. Persistir en base de datos
+        console.log("[Storage] Intentando persistir imagen...");
+        supabase.from('whiteboard_history').insert({ 
+          room_id: roomId, 
+          step_data: newStep, 
+          user_id: user.id 
+        }).select().then(({ data, error }) => {
+          if (error) {
+            console.error("[Storage] Error al guardar imagen en DB:", error);
+            // Si falla por tamaño, intentamos avisar al usuario o reducir más
+            if (error.code === '42703' || error.message?.includes('too long')) {
+               console.warn("[Storage] El dato es demasiado grande para la DB.");
+            }
+          } else if (data && data[0]) {
+            console.log("[Storage] Imagen guardada correctamente con DB ID:", data[0].id);
+            const latestHistory = useWhiteboardStore.getState().history;
+            const idx = latestHistory.findIndex(s => s.id === newId);
+            if (idx !== -1) updateStep(idx, { ...latestHistory[idx], dbId: data[0].id }, true);
+          }
+        });
+
+        setTimeout(() => {
+          const currentHistory = useWhiteboardStore.getState().history;
+          const newIdx = currentHistory.findIndex(s => s.id === newId);
+          if (newIdx !== -1) {
+            setSelection([newIdx]);
+            setTool('select');
+          }
+        }, 50);
+      };
+    };
+    reader.readAsDataURL(file);
+  }, [roomId, user.id, offset, scale, addStep, broadcast, setSelection, setTool, updateStep]);
+
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+    const items = e.clipboardData?.items;
+    const files = e.clipboardData?.files;
+    let imageProcessed = false;
+
+    // 1. Prioridad: Imágenes externas del portapapeles del sistema
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const blob = items[i].getAsFile();
+          if (blob) {
+            processImage(blob);
+            return;
+          }
+        }
       }
     }
-  }, [roomId, user.id, offset, scale, addStep, broadcast]);
+
+    // 2. Respaldo: Archivos directos
+    if (!imageProcessed && files && files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        if (files[i].type.indexOf('image') !== -1) {
+          processImage(files[i]);
+          return;
+        }
+      }
+    }
+
+    // 3. Texto externo: Pegar como objeto de texto
+    const text = e.clipboardData?.getData('text/plain');
+    if (text && text.trim()) {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const centerX = (-offset.x + (rect.width / scale / 2));
+      const centerY = (-offset.y + (rect.height / scale / 2));
+
+      const newStep: DrawStep = {
+        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(7),
+        tool: 'text',
+        points: [{ x: centerX - 100, y: centerY - 25 }],
+        color: '#000000',
+        lineWidth: 1,
+        fontSize: 24,
+        text: text,
+        width: 250,
+        height: 60,
+        fontFamily: 'Inter, sans-serif'
+      };
+
+      addStep(newStep);
+      broadcast('step_added', { step: newStep });
+      supabase.from('whiteboard_history').insert({ room_id: roomId, step_data: newStep, user_id: user.id });
+      return;
+    }
+
+    // 4. Portapapeles Interno: Si no hay nada externo, pegar objetos de Eduboard
+    const internalClipboard = useWhiteboardStore.getState().clipboard;
+    if (internalClipboard && internalClipboard.length > 0) {
+      pasteWrapped();
+    }
+  }, [roomId, user.id, offset, scale, addStep, broadcast, setSelection, setTool, updateStep, pasteWrapped]);
 
   useEffect(() => {
     window.addEventListener('paste', handlePaste);
@@ -1386,7 +1687,8 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
   ];
 
   return (
-    <div
+    <>
+      <div
       ref={containerRef}
       onDoubleClick={handleDoubleClick}
       onWheel={handleWheel}
@@ -1939,7 +2241,19 @@ const Whiteboard = React.forwardRef<any, WhiteboardProps>((props, ref) => {
           </button>
         </div>
       </div>
-    </div >
+      </div >
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        accept="image/*"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) processImage(file);
+          e.target.value = '';
+        }}
+      />
+    </>
   );
 });
 

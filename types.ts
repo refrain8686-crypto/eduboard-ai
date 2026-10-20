@@ -7,7 +7,8 @@ export interface Point {
 }
 
 export interface DrawStep {
-  id?: string;
+  id?: string; // Client-side UUID
+  dbId?: string | number; // Supabase primary key
   tool: Tool;
   points: Point[];
   color: string;
@@ -38,6 +39,7 @@ export interface DrawStep {
 
 export interface User {
   id: string;
+  dbId?: string | number;
   name: string;
   color: string;
   email?: string;

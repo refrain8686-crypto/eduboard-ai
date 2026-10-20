@@ -91,7 +91,13 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   past: [],
   future: [],
   selectedIndices: [],
-  clipboard: [],
+  clipboard: (() => {
+    try {
+      return JSON.parse(localStorage.getItem('eduboard_clipboard') || '[]');
+    } catch (e) {
+      return [];
+    }
+  })(),
   toolColors: {
     pencil: '#000000',
     eraser: '#ffffff',
@@ -380,14 +386,25 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
   // Group / Clipboard
   copySelection: () => set((state) => {
     const selected = state.selectedIndices.map(i => state.history[i]).filter(Boolean);
+    try {
+      localStorage.setItem('eduboard_clipboard', JSON.stringify(selected));
+    } catch (e) {
+      console.warn("Could not save clipboard to localStorage (size limit exceeded?)", e);
+    }
     return { clipboard: selected };
   }),
 
   cutSelection: () => set((state) => {
     const selected = state.selectedIndices.map(i => state.history[i]).filter(Boolean);
+    try {
+      localStorage.setItem('eduboard_clipboard', JSON.stringify(selected));
+    } catch (e) {
+      console.warn("Could not save clipboard to localStorage (size limit exceeded?)", e);
+    }
     const toDelete = new Set(state.selectedIndices);
     const newHistory = state.history.filter((_, i) => !toDelete.has(i));
     return {
+      past: [...state.past, state.history],
       history: newHistory,
       clipboard: selected,
       selectedIndices: [],
@@ -397,9 +414,11 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
 
   paste: () => set((state) => {
     if (state.clipboard.length === 0) return state;
-    // Clone and offset
+    // Clone and offset, AND generate new IDs
     const newItems = state.clipboard.map(item => ({
       ...item,
+      id: crypto.randomUUID(),
+      dbId: undefined, // Must be new in DB
       points: item.points.map(p => ({ x: p.x + 20, y: p.y + 20 }))
     }));
     // Add to history and select new items
@@ -407,6 +426,7 @@ export const useWhiteboardStore = create<WhiteboardState>((set, get) => ({
     const newIndices = newItems.map((_, i) => startIndex + i);
 
     return {
+      past: [...state.past, state.history],
       history: [...state.history, ...newItems],
       selectedIndices: newIndices,
       triggerRedraw: state.triggerRedraw + 1

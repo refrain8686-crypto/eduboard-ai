@@ -114,6 +114,7 @@ const App: React.FC = () => {
           undo={() => whiteboardRef.current?.undo()}
           redo={() => whiteboardRef.current?.redo()}
           deleteSelection={() => whiteboardRef.current?.deleteSelection()}
+          triggerImageUpload={() => whiteboardRef.current?.triggerImageUpload()}
         />
         <main className="flex-1 bg-white relative">
           <Whiteboard ref={whiteboardRef} user={currentUser} roomId={roomId} />

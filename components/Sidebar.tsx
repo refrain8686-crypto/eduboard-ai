@@ -3,12 +3,17 @@ import React from 'react';
 import {
   Pencil, Eraser, Square, Circle, Type, Trash2,
   Undo2, Redo2, Highlighter, Paintbrush, MousePointer2,
-  ChevronRight, Triangle, ArrowRight, Star, Wand2
+  ChevronRight, Triangle, ArrowRight, Star, Wand2, Image as ImageIcon
 } from 'lucide-react';
 import { useWhiteboardStore } from '../store/whiteboardStore';
 import { Tool } from '../types';
 
-const Sidebar: React.FC<{ undo: () => void, redo: () => void, deleteSelection: () => void }> = (props) => {
+const Sidebar: React.FC<{
+  undo: () => void,
+  redo: () => void,
+  deleteSelection: () => void,
+  triggerImageUpload: () => void
+}> = (props) => {
   const [showClearConfirm, setShowClearConfirm] = React.useState(false);
   const {
     tool, setTool, color, setColor, toolWidths, setLineWidth,
@@ -17,7 +22,7 @@ const Sidebar: React.FC<{ undo: () => void, redo: () => void, deleteSelection: (
     isSmoothingEnabled, setIsSmoothingEnabled
   } = useWhiteboardStore();
 
-  const { undo, redo, deleteSelection } = props;
+  const { undo, redo, deleteSelection, triggerImageUpload } = props;
 
   const selectedIndex = selectedIndices.length === 1 ? selectedIndices[0] : null;
   const selectedElement = selectedIndex !== null ? history[selectedIndex] : null;
@@ -25,7 +30,7 @@ const Sidebar: React.FC<{ undo: () => void, redo: () => void, deleteSelection: (
   const isShapeToolActive = ['rect', 'circle', 'triangle', 'arrow', 'star'].includes(tool);
 
   const colors = [
-    '#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'
+    '#000000', '#ffffff', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'
   ];
 
   const mainTools: { id: Tool; icon: any; label: string }[] = [
@@ -86,6 +91,15 @@ const Sidebar: React.FC<{ undo: () => void, redo: () => void, deleteSelection: (
         >
           <Wand2 size={20} />
         </button>
+
+        {/* Botón de Subir Imagen */}
+        <button
+          onClick={triggerImageUpload}
+          className="w-full flex items-center justify-center p-3 rounded-xl text-emerald-500 hover:bg-emerald-50 transition-all"
+          title="Subir Imagen desde PC"
+        >
+          <ImageIcon size={20} />
+        </button>
       </div>
 
       <div className="w-16 h-[1px] bg-gray-100" />
@@ -106,13 +120,14 @@ const Sidebar: React.FC<{ undo: () => void, redo: () => void, deleteSelection: (
 
       <div className="w-16 h-[1px] bg-gray-100" />
 
-      <div className="grid grid-cols-2 gap-2 p-2 bg-gray-50 rounded-2xl">
+      <div className="grid grid-cols-2 gap-3 p-3 bg-gray-50/50 rounded-2xl border border-gray-100">
         {colors.map((c) => (
           <button
             key={c}
             onClick={() => setColor(c)}
-            className={`w-6 h-6 rounded-full border-2 transition-all ${color === c ? 'border-white ring-2 ring-indigo-600 scale-110 shadow-sm' : 'border-transparent hover:scale-105'}`}
+            className={`w-7 h-7 rounded-full border-2 transition-all duration-200 ${color === c ? 'border-indigo-600 scale-125 shadow-lg' : 'border-gray-200 hover:border-indigo-300 hover:scale-110 shadow-sm'}`}
             style={{ backgroundColor: c }}
+            title={c === '#ffffff' ? 'Blanco' : ''}
           />
         ))}
       </div>

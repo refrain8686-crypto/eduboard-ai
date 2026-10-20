@@ -45,11 +45,63 @@ const Dashboard: React.FC<DashboardProps> = ({ onJoinRoom }) => {
     }, []);
 
     useEffect(() => {
-        const saved = localStorage.getItem('eduboard_boards');
-        if (saved) {
-            setBoards(JSON.parse(saved));
-        }
-    }, []);
+        const loadBoards = async () => {
+            // 1. Load from LocalStorage
+            const saved = localStorage.getItem('eduboard_boards');
+            let localBoards: SavedBoard[] = [];
+            if (saved) {
+                try {
+                    localBoards = JSON.parse(saved);
+                    setBoards(localBoards);
+                } catch (e) {
+                    console.error("Error parsing local boards:", e);
+                }
+            }
+
+            // 2. Load from Supabase if user is logged in
+            if (user) {
+                try {
+                    const { data, error } = await supabase
+                        .from('whiteboard_history')
+                        .select('room_id, step_data, created_at')
+                        .eq('user_id', user.id);
+
+                    if (error) throw error;
+
+                    if (data) {
+                        // Filter for ownership claims which contain board metadata
+                        const cloudBoards: SavedBoard[] = data
+                            .filter(item => (item.step_data as any).type === 'OWNERSHIP_CLAIM')
+                            .map(item => ({
+                                id: item.room_id,
+                                name: (item.step_data as any).boardName || (item.step_data as any).name || `Pizarra ${item.room_id.substring(0, 4)}`,
+                                createdAt: new Date(item.created_at).getTime(),
+                                lastModified: new Date(item.created_at).getTime(),
+                                ownerEmail: user.email
+                            }));
+
+                        // Merge with local boards, favoring cloud data for the same ID
+                        setBoards(prev => {
+                            const combined = [...prev];
+                            cloudBoards.forEach(cb => {
+                                const index = combined.findIndex(b => b.id === cb.id);
+                                if (index === -1) {
+                                    combined.push(cb);
+                                } else {
+                                    combined[index] = { ...combined[index], ...cb };
+                                }
+                            });
+                            return combined.sort((a, b) => b.createdAt - a.createdAt);
+                        });
+                    }
+                } catch (err) {
+                    console.error("Error fetching cloud boards:", err);
+                }
+            }
+        };
+
+        loadBoards();
+    }, [user]);
 
     const saveBoards = (newBoards: SavedBoard[]) => {
         setBoards(newBoards);
@@ -99,21 +151,41 @@ const Dashboard: React.FC<DashboardProps> = ({ onJoinRoom }) => {
         await supabase.auth.signOut();
     };
 
-    const handleCreateBoard = () => {
+    const handleCreateBoard = async () => {
         if (!newBoardName.trim()) return;
 
+        const boardId = generateRoomId();
         const newBoard: SavedBoard = {
-            id: generateRoomId(),
+            id: boardId,
             name: newBoardName,
             createdAt: Date.now(),
             lastModified: Date.now(),
             ownerEmail: user?.email
         };
 
+        // Guardar localmente
         saveBoards([newBoard, ...boards]);
+
+        // Si hay usuario, guardar el "claim" en Supabase inmediatamente con el nombre
+        if (user) {
+            try {
+                await supabase.from('whiteboard_history').insert({
+                    room_id: boardId,
+                    step_data: {
+                        type: 'OWNERSHIP_CLAIM',
+                        ownerEmail: user.email,
+                        boardName: newBoardName
+                    },
+                    user_id: user.id
+                });
+            } catch (err) {
+                console.error("Error saving board claim to cloud:", err);
+            }
+        }
+
         setNewBoardName('');
         setIsCreating(false);
-        onJoinRoom(newBoard.id);
+        onJoinRoom(boardId);
     };
 
     const handleDeleteBoard = (id: string, e: React.MouseEvent) => {
